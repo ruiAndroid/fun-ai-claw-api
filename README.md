@@ -19,7 +19,7 @@ Default port: `8080`
 
 Default database config is in `src/main/resources/application.yml` and points to:
 
-- `jdbc:postgresql://172.21.138.98:5432/fun_ai_agent`
+- `jdbc:postgresql://172.21.138.98:5432/fun_ai_claw`
 - username: `funai_agent`
 
 Schema is auto-initialized at startup via `src/main/resources/schema.sql`.
