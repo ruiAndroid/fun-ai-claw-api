@@ -1,4 +1,4 @@
-﻿package com.fun.ai.claw.api.model;
+package com.fun.ai.claw.api.model;
 
 public record HealthResponse(
         String status,

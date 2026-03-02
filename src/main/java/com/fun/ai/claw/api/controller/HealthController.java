@@ -1,4 +1,4 @@
-﻿package com.fun.ai.claw.api.controller;
+package com.fun.ai.claw.api.controller;
 
 import com.fun.ai.claw.api.model.HealthResponse;
 import org.springframework.web.bind.annotation.GetMapping;

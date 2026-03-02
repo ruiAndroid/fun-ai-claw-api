@@ -1,4 +1,4 @@
-﻿package com.fun.ai.claw.api.config;
+package com.fun.ai.claw.api.config;
 
 import com.fun.ai.claw.api.service.TerminalWebSocketHandler;
 import org.springframework.context.annotation.Configuration;

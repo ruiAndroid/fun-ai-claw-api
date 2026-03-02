@@ -1,4 +1,4 @@
-﻿package com.fun.ai.claw.api.service;
+package com.fun.ai.claw.api.service;
 
 import com.fun.ai.claw.api.config.ImageCatalogProperties;
 import com.fun.ai.claw.api.model.AcceptedActionResponse;

@@ -1,4 +1,4 @@
-﻿package com.fun.ai.claw.api.service;
+package com.fun.ai.claw.api.service;
 
 import com.fun.ai.claw.api.model.InstanceActionType;
 import org.springframework.beans.factory.annotation.Value;

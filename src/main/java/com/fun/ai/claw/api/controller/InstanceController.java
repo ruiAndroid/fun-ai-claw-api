@@ -1,4 +1,4 @@
-﻿package com.fun.ai.claw.api.controller;
+package com.fun.ai.claw.api.controller;
 
 import com.fun.ai.claw.api.model.AcceptedActionResponse;
 import com.fun.ai.claw.api.model.CreateInstanceRequest;

@@ -1,4 +1,4 @@
-﻿package com.fun.ai.claw.api.config;
+package com.fun.ai.claw.api.config;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;

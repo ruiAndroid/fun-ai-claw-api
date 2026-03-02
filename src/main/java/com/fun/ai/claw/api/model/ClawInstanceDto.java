@@ -1,4 +1,4 @@
-﻿package com.fun.ai.claw.api.model;
+package com.fun.ai.claw.api.model;
 
 import java.time.Instant;
 import java.util.UUID;
