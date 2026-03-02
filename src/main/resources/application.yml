@@ -1,0 +1,65 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: fun-ai-claw-api
+  datasource:
+    url: "jdbc:postgresql://${DB_HOST:127.0.0.1}:${DB_PORT:5432}/fun_ai_agent"
+    username: "${DB_USER:funai_agent}"
+    password: "${DB_PASSWORD:Ss123456!}"
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 10000
+  sql:
+    init:
+      mode: always
+
+app:
+  cors:
+    allowed-origins: https://studio.fun.tv
+  plane:
+    base-url: ${PLANE_BASE_URL:http://127.0.0.1:8090/internal/v1}
+    requested-by: ${PLANE_REQUESTED_BY:fun-ai-claw-api}
+  gateway:
+    port-range-start: ${GATEWAY_PORT_RANGE_START:42617}
+    port-range-end: ${GATEWAY_PORT_RANGE_END:42717}
+    url-template: ${GATEWAY_URL_TEMPLATE:http://172.21.138.98:{port}}
+  remote-connect:
+    command-template: ${REMOTE_CONNECT_COMMAND_TEMPLATE:ssh root@172.21.138.98 "docker exec -it funclaw-{instanceId} /bin/busybox sh"}
+  terminal:
+    docker-command: ${TERMINAL_DOCKER_COMMAND:docker}
+    container-prefix: ${TERMINAL_CONTAINER_PREFIX:funclaw}
+    shell: ${TERMINAL_SHELL:/bin/busybox sh}
+    process-shutdown-timeout-seconds: ${TERMINAL_PROCESS_SHUTDOWN_TIMEOUT_SECONDS:2}
+  images:
+    allow-custom-image: false
+    presets:
+      - id: zeroclaw-shell
+        name: ZeroClaw Shell
+        image: ${ZEROCLAW_PRESET_IMAGE_SHELL:${ZEROCLAW_PRESET_IMAGE:zeroclaw-shell:latest}}
+        description: ZeroClaw image with shell support (gateway mode)
+        recommended: true
+      - id: zeroclaw-python
+        name: ZeroClaw + Python
+        image: ${ZEROCLAW_PRESET_IMAGE_PYTHON:zeroclaw-python:latest}
+        description: ZeroClaw image with Python runtime
+        recommended: false
+      - id: zeroclaw-node
+        name: ZeroClaw + Node.js
+        image: ${ZEROCLAW_PRESET_IMAGE_NODE:zeroclaw-node:latest}
+        description: ZeroClaw image with Node.js runtime
+        recommended: false
+      - id: zeroclaw-python-node
+        name: ZeroClaw + Python + Node.js
+        image: ${ZEROCLAW_PRESET_IMAGE_PYTHON_NODE:zeroclaw-python-node:latest}
+        description: ZeroClaw image with Python and Node.js runtimes
+        recommended: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

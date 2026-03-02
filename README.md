@@ -1,4 +1,4 @@
-# fun-ai-agent-api
+# fun-ai-claw-api
 
 Control API service for managing claw instances.
 
@@ -54,22 +54,22 @@ app:
 - `DELETE /v1/instances/{instanceId}` removes the instance and its action history.
 - API calls plane service for real execution. Configure:
   - `PLANE_BASE_URL` (default: `http://127.0.0.1:8090/internal/v1`)
-  - `PLANE_REQUESTED_BY` (default: `fun-ai-agent-api`)
+  - `PLANE_REQUESTED_BY` (default: `fun-ai-claw-api`)
 - Set `ZEROCLAW_PRESET_IMAGE` in deployment env to point to your own registry mirror.
 
 ## Update Script
 
-Use `update-agent-api.sh` for one-command update on server:
+Use `update-claw-api.sh` for one-command update on server:
 
 ```bash
-chmod +x /opt/fun-ai-agent-api/update-agent-api.sh
-/opt/fun-ai-agent-api/update-agent-api.sh
+chmod +x /opt/fun-ai-claw-api/update-claw-api.sh
+/opt/fun-ai-claw-api/update-claw-api.sh
 ```
 
 Optional environment variables:
 
-- `APP_DIR` (default: `/opt/fun-ai-agent-api`)
-- `SERVICE_NAME` (default: `fun-ai-agent-api`)
+- `APP_DIR` (default: `/opt/fun-ai-claw-api`)
+- `SERVICE_NAME` (default: `fun-ai-claw-api`)
 - `GIT_REMOTE` (default: `origin`)
 - `GIT_BRANCH` (default: `main`)
 - `HEALTH_URL` (default: `http://127.0.0.1:8080/v1/health`)
