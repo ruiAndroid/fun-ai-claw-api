@@ -10,7 +10,7 @@ import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.PongMessage;
 import org.springframework.web.socket.TextMessage;
-import org.springframework.web.socket.WebSocketHandler;
+import org.springframework.web.socket.WebSocketHttpHeaders;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.client.WebSocketClient;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
@@ -88,7 +88,7 @@ public class UiControllerWebSocketProxyHandler extends AbstractWebSocketHandler 
         }
 
         URI targetUri = buildTargetUri(targetPort, routeTarget.get().downstreamPath(), clientSession.getUri());
-        HttpHeaders outboundHeaders = copyHandshakeHeaders(clientSession.getHandshakeHeaders());
+        WebSocketHttpHeaders outboundHeaders = copyHandshakeHeaders(clientSession.getHandshakeHeaders());
 
         ProxyContext context = new ProxyContext(clientSession);
         contexts.put(clientSession.getId(), context);
@@ -197,9 +197,9 @@ public class UiControllerWebSocketProxyHandler extends AbstractWebSocketHandler 
         return URI.create(uriBuilder.toString());
     }
 
-    private HttpHeaders copyHandshakeHeaders(HttpHeaders inboundHeaders) {
-        HttpHeaders outboundHeaders = new HttpHeaders();
-        for (Map.Entry<String, List<String>> entry : inboundHeaders.entrySet()) {
+    private WebSocketHttpHeaders copyHandshakeHeaders(HttpHeaders inboundHeaders) {
+        WebSocketHttpHeaders outboundHeaders = new WebSocketHttpHeaders();
+        for (Map.Entry<String, List<String>> entry : inboundHeaders.headerSet()) {
             if (entry.getKey() == null) {
                 continue;
             }
@@ -389,4 +389,3 @@ public class UiControllerWebSocketProxyHandler extends AbstractWebSocketHandler 
         }
     }
 }
-
