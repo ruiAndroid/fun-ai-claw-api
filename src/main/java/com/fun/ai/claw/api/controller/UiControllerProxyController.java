@@ -97,7 +97,8 @@ public class UiControllerProxyController {
                     RequestMethod.DELETE,
                     RequestMethod.HEAD,
                     RequestMethod.OPTIONS
-            }
+            },
+            headers = "!Upgrade"
     )
     public ResponseEntity<byte[]> proxy(@PathVariable UUID instanceId,
                                         HttpServletRequest request,
@@ -401,10 +402,25 @@ public class UiControllerProxyController {
                       }
                     }
                   }
+                  function rewriteAnchors(root) {
+                    if (!root || !root.querySelectorAll) { return; }
+                    var anchors = root.querySelectorAll('a[href]');
+                    for (var i = 0; i < anchors.length; i++) {
+                      var current = anchors[i].getAttribute('href');
+                      var next = rewriteUrlLike(current);
+                      if (next !== current) {
+                        anchors[i].setAttribute('href', next);
+                      }
+                    }
+                  }
+                  function rewriteDomTargets(root) {
+                    rewriteForms(root);
+                    rewriteAnchors(root);
+                  }
                   if (doc.readyState === 'loading') {
-                    doc.addEventListener('DOMContentLoaded', function () { rewriteForms(doc); });
+                    doc.addEventListener('DOMContentLoaded', function () { rewriteDomTargets(doc); });
                   } else {
-                    rewriteForms(doc);
+                    rewriteDomTargets(doc);
                   }
                   if (window.MutationObserver && doc.documentElement) {
                     var observer = new MutationObserver(function (mutations) {
@@ -413,7 +429,7 @@ public class UiControllerProxyController {
                         for (var j = 0; j < addedNodes.length; j++) {
                           var node = addedNodes[j];
                           if (node && node.nodeType === 1) {
-                            rewriteForms(node);
+                            rewriteDomTargets(node);
                           }
                         }
                       }

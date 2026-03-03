@@ -44,6 +44,8 @@ public class UiControllerWebSocketProxyHandler extends AbstractWebSocketHandler 
     private static final Set<String> FORWARDED_HANDSHAKE_HEADERS = Set.of(
             "authorization",
             "cookie",
+            "origin",
+            "referer",
             "sec-websocket-protocol",
             "user-agent"
     );
