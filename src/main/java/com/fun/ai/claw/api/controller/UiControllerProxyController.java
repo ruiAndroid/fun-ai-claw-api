@@ -18,7 +18,9 @@ import org.springframework.web.server.ResponseStatusException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -27,9 +29,11 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Enumeration;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 @RestController
@@ -73,18 +77,34 @@ public class UiControllerProxyController {
     private final String upstreamHost;
     private final Duration requestTimeout;
     private final boolean forceConfigPathOnSave;
+    private final String dockerCommand;
+    private final String containerPrefix;
+    private final boolean configSaveFallbackEnabled;
+    private final String configSaveFallbackPath;
+    private final Duration commandTimeout;
 
     public UiControllerProxyController(InstanceRepository instanceRepository,
                                        @Value("${app.ui-controller.upstream-scheme:http}") String upstreamScheme,
                                        @Value("${app.ui-controller.upstream-host:127.0.0.1}") String upstreamHost,
                                        @Value("${app.ui-controller.request-timeout-seconds:60}") long requestTimeoutSeconds,
-                                       @Value("${app.ui-controller.force-config-path-on-save:true}") boolean forceConfigPathOnSave) {
+                                       @Value("${app.ui-controller.force-config-path-on-save:true}") boolean forceConfigPathOnSave,
+                                       @Value("${app.ui-controller.docker-command:docker}") String dockerCommand,
+                                       @Value("${app.ui-controller.container-prefix:funclaw}") String containerPrefix,
+                                       @Value("${app.ui-controller.config-save-fallback-enabled:true}") boolean configSaveFallbackEnabled,
+                                       @Value("${app.ui-controller.config-save-fallback-path:/data/zeroclaw/config.toml}") String configSaveFallbackPath,
+                                       @Value("${app.ui-controller.command-timeout-seconds:15}") long commandTimeoutSeconds) {
         this.instanceRepository = instanceRepository;
         this.upstreamScheme = normalizeScheme(upstreamScheme);
         this.upstreamHost = requireHost(upstreamHost);
         long timeoutSeconds = requestTimeoutSeconds > 0 ? requestTimeoutSeconds : 60;
         this.requestTimeout = Duration.ofSeconds(timeoutSeconds);
         this.forceConfigPathOnSave = forceConfigPathOnSave;
+        this.dockerCommand = dockerCommand;
+        this.containerPrefix = containerPrefix;
+        this.configSaveFallbackEnabled = configSaveFallbackEnabled;
+        this.configSaveFallbackPath = configSaveFallbackPath;
+        long commandSeconds = commandTimeoutSeconds > 0 ? commandTimeoutSeconds : 15;
+        this.commandTimeout = Duration.ofSeconds(commandSeconds);
         this.httpClient = HttpClient.newBuilder()
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .build();
@@ -151,6 +171,14 @@ public class UiControllerProxyController {
                             retryUri,
                             retryErrorBody);
                 }
+            }
+        }
+        if (shouldApplyDirectConfigSaveFallback(request, targetUri, requestBody, upstreamResponse)) {
+            if (saveConfigFileToContainer(instanceId, requestBody)) {
+                HttpHeaders fallbackHeaders = new HttpHeaders();
+                fallbackHeaders.set(HttpHeaders.CONTENT_TYPE, "application/json");
+                byte[] body = "{\"saved\":true,\"source\":\"ui-proxy-fallback\"}".getBytes(StandardCharsets.UTF_8);
+                return new ResponseEntity<>(body, fallbackHeaders, HttpStatusCode.valueOf(200));
             }
         }
         return buildResponse(instanceId, upstreamResponse);
@@ -296,6 +324,111 @@ public class UiControllerProxyController {
             uriBuilder.append("&filePath=").append(ZEROCLAW_DEFAULT_CONFIG_PATH);
         }
         return URI.create(uriBuilder.toString());
+    }
+
+    private boolean shouldApplyDirectConfigSaveFallback(HttpServletRequest inboundRequest,
+                                                        URI targetUri,
+                                                        byte[] requestBody,
+                                                        HttpResponse<byte[]> upstreamResponse) {
+        if (!configSaveFallbackEnabled || targetUri == null || requestBody == null || requestBody.length == 0) {
+            return false;
+        }
+        if (!isConfigEndpoint(targetUri.getPath())) {
+            return false;
+        }
+        String method = inboundRequest.getMethod();
+        if (!"PUT".equalsIgnoreCase(method) && !"POST".equalsIgnoreCase(method) && !"PATCH".equalsIgnoreCase(method)) {
+            return false;
+        }
+        if (upstreamResponse == null || upstreamResponse.statusCode() < 500) {
+            return false;
+        }
+        byte[] body = upstreamResponse.body();
+        if (body == null || body.length == 0) {
+            return false;
+        }
+        String errorText = new String(body, StandardCharsets.UTF_8).toLowerCase(Locale.ROOT);
+        return errorText.contains("config path must have a parent directory");
+    }
+
+    private boolean saveConfigFileToContainer(UUID instanceId, byte[] configBytes) {
+        if (!StringUtils.hasText(configSaveFallbackPath) || !StringUtils.hasText(containerPrefix)) {
+            return false;
+        }
+        String path = configSaveFallbackPath.trim();
+        int lastSlash = path.lastIndexOf('/');
+        if (lastSlash <= 0) {
+            log.warn("ui proxy fallback save skipped: invalid config path {}", path);
+            return false;
+        }
+        String directory = path.substring(0, lastSlash);
+        String containerName = containerPrefix.trim() + "-" + instanceId;
+
+        CommandResult mkdirResult = runProcess(List.of(
+                dockerCommand,
+                "exec",
+                containerName,
+                "sh",
+                "-lc",
+                "mkdir -p " + shellQuote(directory)
+        ), null);
+        if (mkdirResult.exitCode != 0) {
+            log.warn("ui proxy fallback mkdir failed for {}: {}", containerName, mkdirResult.output);
+            return false;
+        }
+
+        CommandResult writeResult = runProcess(List.of(
+                dockerCommand,
+                "exec",
+                "-i",
+                containerName,
+                "sh",
+                "-lc",
+                "cat > " + shellQuote(path)
+        ), configBytes);
+        if (writeResult.exitCode != 0) {
+            log.warn("ui proxy fallback write failed for {}: {}", containerName, writeResult.output);
+            return false;
+        }
+        log.info("ui proxy fallback saved config directly to container {} at {}", containerName, path);
+        return true;
+    }
+
+    private CommandResult runProcess(List<String> command, byte[] stdinBytes) {
+        ProcessBuilder builder = new ProcessBuilder(command);
+        builder.redirectErrorStream(true);
+        try {
+            Process process = builder.start();
+            if (stdinBytes != null && stdinBytes.length > 0) {
+                try (OutputStream os = process.getOutputStream()) {
+                    os.write(stdinBytes);
+                    os.flush();
+                }
+            } else {
+                process.getOutputStream().close();
+            }
+
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            process.getInputStream().transferTo(output);
+            boolean finished = process.waitFor(commandTimeout.toMillis(), TimeUnit.MILLISECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                return new CommandResult(124, "command timed out");
+            }
+            return new CommandResult(process.exitValue(), output.toString(StandardCharsets.UTF_8));
+        } catch (IOException ex) {
+            return new CommandResult(1, "io error: " + ex.getMessage());
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            return new CommandResult(130, "interrupted");
+        }
+    }
+
+    private String shellQuote(String value) {
+        return "'" + value.replace("'", "'\"'\"'") + "'";
+    }
+
+    private record CommandResult(int exitCode, String output) {
     }
 
     private HttpRequest buildOutboundRequest(HttpServletRequest inboundRequest, byte[] requestBody, URI targetUri) {
