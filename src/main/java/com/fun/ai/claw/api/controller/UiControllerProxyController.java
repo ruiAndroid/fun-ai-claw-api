@@ -15,6 +15,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.URI;
@@ -32,6 +34,7 @@ import java.util.regex.Pattern;
 
 @RestController
 public class UiControllerProxyController {
+    private static final Logger log = LoggerFactory.getLogger(UiControllerProxyController.class);
     private static final String ZEROCLAW_DEFAULT_CONFIG_PATH = "/data/zeroclaw/config.toml";
     private static final Pattern CONFIG_PATH_PATTERN = Pattern.compile("(?i)\"config_path\"\\s*:\\s*\"[^\"]*\"");
     private static final Pattern CONFIG_PATH_CAMEL_PATTERN = Pattern.compile("(?i)\"configPath\"\\s*:\\s*\"[^\"]*\"");
@@ -124,6 +127,14 @@ public class UiControllerProxyController {
         URI targetUri = buildTargetUri(instanceId, gatewayHostPort, request);
         HttpRequest outboundRequest = buildOutboundRequest(request, requestBody, targetUri);
         HttpResponse<byte[]> upstreamResponse = send(outboundRequest);
+        if (shouldRetryConfigSaveWithForcedPath(request, targetUri, upstreamResponse)) {
+            URI retryUri = ensureConfigPathQueryPresent(targetUri);
+            if (!retryUri.equals(targetUri)) {
+                log.warn("ui proxy retry /api/config with forced config_path: {}", retryUri);
+                HttpRequest retryRequest = buildOutboundRequest(request, requestBody, retryUri);
+                upstreamResponse = send(retryRequest);
+            }
+        }
         return buildResponse(instanceId, upstreamResponse);
     }
 
@@ -143,7 +154,7 @@ public class UiControllerProxyController {
         }
 
         String queryString = request.getQueryString();
-        if ("/api/config".equals(downstreamPath) || "/api/config/".equals(downstreamPath)) {
+        if (isConfigEndpoint(downstreamPath)) {
             queryString = appendConfigPathQueryIfMissing(queryString);
         }
 
@@ -162,13 +173,60 @@ public class UiControllerProxyController {
 
     private String appendConfigPathQueryIfMissing(String queryString) {
         if (!StringUtils.hasText(queryString)) {
+            log.info("ui proxy append config_path for /api/config request");
             return "config_path=" + ZEROCLAW_DEFAULT_CONFIG_PATH;
         }
         String lower = queryString.toLowerCase(Locale.ROOT);
         if (lower.contains("config_path=") || lower.contains("configpath=")) {
             return queryString;
         }
+        log.info("ui proxy append missing config_path for /api/config request");
         return queryString + "&config_path=" + ZEROCLAW_DEFAULT_CONFIG_PATH;
+    }
+
+    private boolean isConfigEndpoint(String path) {
+        if (!StringUtils.hasText(path)) {
+            return false;
+        }
+        return "/api/config".equals(path)
+                || "/api/config/".equals(path)
+                || path.startsWith("/api/config/");
+    }
+
+    private boolean shouldRetryConfigSaveWithForcedPath(HttpServletRequest inboundRequest,
+                                                        URI targetUri,
+                                                        HttpResponse<byte[]> upstreamResponse) {
+        if (upstreamResponse == null || targetUri == null) {
+            return false;
+        }
+        String method = inboundRequest.getMethod();
+        if (!"PUT".equalsIgnoreCase(method) && !"POST".equalsIgnoreCase(method) && !"PATCH".equalsIgnoreCase(method)) {
+            return false;
+        }
+        if (!isConfigEndpoint(targetUri.getPath())) {
+            return false;
+        }
+        if (upstreamResponse.statusCode() < 500) {
+            return false;
+        }
+        byte[] body = upstreamResponse.body();
+        if (body == null || body.length == 0) {
+            return false;
+        }
+        String errorText = new String(body, StandardCharsets.UTF_8).toLowerCase(Locale.ROOT);
+        return errorText.contains("config path must have a parent directory");
+    }
+
+    private URI ensureConfigPathQueryPresent(URI uri) {
+        String query = uri.getRawQuery();
+        if (!StringUtils.hasText(query)) {
+            return URI.create(uri.toString() + "?config_path=" + ZEROCLAW_DEFAULT_CONFIG_PATH);
+        }
+        String lower = query.toLowerCase(Locale.ROOT);
+        if (lower.contains("config_path=") || lower.contains("configpath=")) {
+            return uri;
+        }
+        return URI.create(uri.toString() + "&config_path=" + ZEROCLAW_DEFAULT_CONFIG_PATH);
     }
 
     private HttpRequest buildOutboundRequest(HttpServletRequest inboundRequest, byte[] requestBody, URI targetUri) {
