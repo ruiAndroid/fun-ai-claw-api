@@ -223,6 +223,7 @@ public class UiControllerProxyController {
                 .orElse("")
                 .toLowerCase(Locale.ROOT);
 
+        boolean htmlContent = contentType.contains("text/html");
         boolean rewritable = contentType.contains("text/html")
                 || contentType.contains("javascript")
                 || contentType.contains("application/json");
@@ -250,6 +251,9 @@ public class UiControllerProxyController {
                 .replace("'/pair'", "'" + uiBase + "/pair'")
                 .replace("'/pair?", "'" + uiBase + "/pair?")
                 .replace("'/pair/", "'" + uiBase + "/pair/");
+        if (htmlContent) {
+            rewritten = injectUiUrlShim(rewritten, uiBase);
+        }
 
         if (rewritten.equals(raw)) {
             return source;
@@ -281,5 +285,122 @@ public class UiControllerProxyController {
             throw new IllegalArgumentException("app.ui-controller.upstream-host must not be blank");
         }
         return host.trim();
+    }
+
+    private String injectUiUrlShim(String html, String uiBase) {
+        if (!StringUtils.hasText(html) || html.contains("data-fun-claw-ui-shim")) {
+            return html;
+        }
+        String escapedBase = uiBase
+                .replace("\\", "\\\\")
+                .replace("'", "\\'");
+        String shim = """
+                <script data-fun-claw-ui-shim>
+                (function () {
+                  var base = '%s';
+                  var doc = document;
+                  function isHttpUrl(url) { return /^https?:\\/\\//i.test(url); }
+                  function isWsUrl(url) { return /^wss?:\\/\\//i.test(url); }
+                  function prefixPath(path) {
+                    if (typeof path !== 'string' || !path) { return path; }
+                    if (path.indexOf(base + '/') === 0 || path === base) { return path; }
+                    if (path.charAt(0) !== '/') { return path; }
+                    if (path.indexOf('/fun-claw/api/') === 0) { return path; }
+                    return base + path;
+                  }
+                  function rewriteUrlLike(url) {
+                    if (typeof url !== 'string' || !url) { return url; }
+                    if (url.indexOf('//') === 0) { return url; }
+                    if (isHttpUrl(url) || isWsUrl(url)) {
+                      try {
+                        var parsed = new URL(url, window.location.origin);
+                        if (parsed.origin !== window.location.origin) { return url; }
+                        var nextPath = prefixPath(parsed.pathname);
+                        if (nextPath === parsed.pathname) { return url; }
+                        return parsed.origin + nextPath + parsed.search + parsed.hash;
+                      } catch (e) {
+                        return url;
+                      }
+                    }
+                    return prefixPath(url);
+                  }
+                  var originalFetch = window.fetch;
+                  if (typeof originalFetch === 'function') {
+                    window.fetch = function (input, init) {
+                      if (typeof input === 'string') {
+                        return originalFetch.call(this, rewriteUrlLike(input), init);
+                      }
+                      if (typeof Request !== 'undefined' && input instanceof Request) {
+                        var rewritten = rewriteUrlLike(input.url);
+                        if (rewritten !== input.url) {
+                          var copied = new Request(rewritten, input);
+                          return originalFetch.call(this, copied, init);
+                        }
+                      }
+                      return originalFetch.call(this, input, init);
+                    };
+                  }
+                  var xhrOpen = window.XMLHttpRequest && window.XMLHttpRequest.prototype && window.XMLHttpRequest.prototype.open;
+                  if (xhrOpen) {
+                    window.XMLHttpRequest.prototype.open = function (method, url) {
+                      var args = Array.prototype.slice.call(arguments);
+                      args[1] = rewriteUrlLike(url);
+                      return xhrOpen.apply(this, args);
+                    };
+                  }
+                  var NativeWebSocket = window.WebSocket;
+                  if (NativeWebSocket) {
+                    window.WebSocket = function (url, protocols) {
+                      var rewritten = rewriteUrlLike(url);
+                      return protocols === undefined ? new NativeWebSocket(rewritten) : new NativeWebSocket(rewritten, protocols);
+                    };
+                    window.WebSocket.prototype = NativeWebSocket.prototype;
+                  }
+                  var NativeEventSource = window.EventSource;
+                  if (NativeEventSource) {
+                    window.EventSource = function (url, configuration) {
+                      return new NativeEventSource(rewriteUrlLike(url), configuration);
+                    };
+                    window.EventSource.prototype = NativeEventSource.prototype;
+                  }
+                  function rewriteForms(root) {
+                    if (!root || !root.querySelectorAll) { return; }
+                    var forms = root.querySelectorAll('form[action]');
+                    for (var i = 0; i < forms.length; i++) {
+                      var current = forms[i].getAttribute('action');
+                      var next = rewriteUrlLike(current);
+                      if (next !== current) {
+                        forms[i].setAttribute('action', next);
+                      }
+                    }
+                  }
+                  if (doc.readyState === 'loading') {
+                    doc.addEventListener('DOMContentLoaded', function () { rewriteForms(doc); });
+                  } else {
+                    rewriteForms(doc);
+                  }
+                  if (window.MutationObserver && doc.documentElement) {
+                    var observer = new MutationObserver(function (mutations) {
+                      for (var i = 0; i < mutations.length; i++) {
+                        var addedNodes = mutations[i].addedNodes;
+                        for (var j = 0; j < addedNodes.length; j++) {
+                          var node = addedNodes[j];
+                          if (node && node.nodeType === 1) {
+                            rewriteForms(node);
+                          }
+                        }
+                      }
+                    });
+                    observer.observe(doc.documentElement, { childList: true, subtree: true });
+                  }
+                })();
+                </script>
+                """.formatted(escapedBase);
+        String normalized = html;
+        int headClose = normalized.toLowerCase(Locale.ROOT).indexOf("</head>");
+        if (headClose >= 0) {
+            return normalized.substring(0, headClose) + shim + normalized.substring(headClose);
+        }
+        return shim + normalized;
     }
 }
