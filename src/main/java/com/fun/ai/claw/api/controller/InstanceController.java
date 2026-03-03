@@ -5,7 +5,9 @@ import com.fun.ai.claw.api.model.CreateInstanceRequest;
 import com.fun.ai.claw.api.model.InstanceActionRequest;
 import com.fun.ai.claw.api.model.ListResponse;
 import com.fun.ai.claw.api.model.ClawInstanceDto;
+import com.fun.ai.claw.api.model.PairingCodeResponse;
 import com.fun.ai.claw.api.service.ControlService;
+import com.fun.ai.claw.api.service.PairingCodeService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -24,9 +26,11 @@ import java.util.UUID;
 public class InstanceController {
 
     private final ControlService controlService;
+    private final PairingCodeService pairingCodeService;
 
-    public InstanceController(ControlService controlService) {
+    public InstanceController(ControlService controlService, PairingCodeService pairingCodeService) {
         this.controlService = controlService;
+        this.pairingCodeService = pairingCodeService;
     }
 
     @GetMapping
@@ -45,6 +49,11 @@ public class InstanceController {
     public AcceptedActionResponse submitAction(@PathVariable UUID instanceId,
                                                @Valid @RequestBody InstanceActionRequest request) {
         return controlService.submitInstanceAction(instanceId, request);
+    }
+
+    @GetMapping("/{instanceId}/pairing-code")
+    public PairingCodeResponse getPairingCode(@PathVariable UUID instanceId) {
+        return pairingCodeService.fetchPairingCode(instanceId);
     }
 
     @DeleteMapping("/{instanceId}")

@@ -34,6 +34,9 @@ app:
     upstream-host: ${UI_CONTROLLER_UPSTREAM_HOST:127.0.0.1}
     fixed-api-key: fun-ai-claw-fixed-2026
     request-timeout-seconds: ${UI_CONTROLLER_REQUEST_TIMEOUT_SECONDS:60}
+  pairing-code:
+    log-tail-lines: 300
+    command-timeout-seconds: 8
   terminal:
     docker-command: ${TERMINAL_DOCKER_COMMAND:docker}
     container-prefix: ${TERMINAL_CONTAINER_PREFIX:funclaw}
