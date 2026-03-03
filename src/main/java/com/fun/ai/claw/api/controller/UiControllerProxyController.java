@@ -235,7 +235,15 @@ public class UiControllerProxyController {
         String uiBase = "/fun-claw/ui-controller/" + instanceId;
         String rewritten = raw
                 .replace("\"/_app/", "\"" + uiBase + "/_app/")
-                .replace("'/_app/", "'" + uiBase + "/_app/");
+                .replace("'/_app/", "'" + uiBase + "/_app/")
+                .replace("action=\"/pair\"", "action=\"" + uiBase + "/pair\"")
+                .replace("action='/pair'", "action='" + uiBase + "/pair'")
+                .replace("\"/pair\"", "\"" + uiBase + "/pair\"")
+                .replace("\"/pair?", "\"" + uiBase + "/pair?")
+                .replace("\"/pair/", "\"" + uiBase + "/pair/")
+                .replace("'/pair'", "'" + uiBase + "/pair'")
+                .replace("'/pair?", "'" + uiBase + "/pair?")
+                .replace("'/pair/", "'" + uiBase + "/pair/");
 
         if (rewritten.equals(raw)) {
             return source;
