@@ -207,6 +207,10 @@ public class UiControllerProxyController {
             if (shouldSkipResponseHeader(headerName)) {
                 return;
             }
+            if ("set-cookie".equalsIgnoreCase(headerName)) {
+                responseHeaders.put(headerName, rewriteSetCookiePaths(values));
+                return;
+            }
             responseHeaders.put(headerName, new ArrayList<>(values));
         });
 
@@ -269,6 +273,22 @@ public class UiControllerProxyController {
         return SKIPPED_RESPONSE_HEADERS.contains(headerName.toLowerCase(Locale.ROOT));
     }
 
+    private ArrayList<String> rewriteSetCookiePaths(java.util.List<String> sourceValues) {
+        ArrayList<String> rewritten = new ArrayList<>();
+        for (String raw : sourceValues) {
+            if (!StringUtils.hasText(raw)) {
+                rewritten.add(raw);
+                continue;
+            }
+            if (raw.toLowerCase(Locale.ROOT).contains("path=")) {
+                rewritten.add(raw.replaceAll("(?i)Path=[^;]*", "Path=/"));
+            } else {
+                rewritten.add(raw + "; Path=/");
+            }
+        }
+        return rewritten;
+    }
+
     private String normalizeScheme(String scheme) {
         if (!StringUtils.hasText(scheme)) {
             return "http";
@@ -319,7 +339,9 @@ public class UiControllerProxyController {
                     if (isHttpUrl(url) || isWsUrl(url)) {
                       try {
                         var parsed = new URL(url, window.location.origin);
-                        if (parsed.origin !== window.location.origin) { return url; }
+                        var sameOrigin = parsed.origin === window.location.origin;
+                        var sameHost = parsed.host === window.location.host;
+                        if (!sameOrigin && !(isWsUrl(url) && sameHost) && !(isHttpUrl(url) && sameHost)) { return url; }
                         var nextPath = prefixPath(parsed.pathname);
                         if (nextPath === parsed.pathname) { return url; }
                         return parsed.origin + nextPath + parsed.search + parsed.hash;
