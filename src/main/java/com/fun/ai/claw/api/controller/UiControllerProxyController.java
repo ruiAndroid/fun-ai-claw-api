@@ -21,6 +21,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Enumeration;
@@ -42,6 +43,7 @@ public class UiControllerProxyController {
             "te",
             "trailer",
             "transfer-encoding",
+            "accept-encoding",
             "x-forwarded-for",
             "x-forwarded-host",
             "x-forwarded-proto"
@@ -114,7 +116,7 @@ public class UiControllerProxyController {
         URI targetUri = buildTargetUri(instanceId, gatewayHostPort, request);
         HttpRequest outboundRequest = buildOutboundRequest(request, requestBody, targetUri);
         HttpResponse<byte[]> upstreamResponse = send(outboundRequest);
-        return buildResponse(upstreamResponse);
+        return buildResponse(instanceId, upstreamResponse);
     }
 
     private URI buildTargetUri(UUID instanceId, int targetPort, HttpServletRequest request) {
@@ -198,7 +200,8 @@ public class UiControllerProxyController {
         }
     }
 
-    private ResponseEntity<byte[]> buildResponse(HttpResponse<byte[]> upstreamResponse) {
+    private ResponseEntity<byte[]> buildResponse(UUID instanceId, HttpResponse<byte[]> upstreamResponse) {
+        byte[] responseBody = rewriteUiAssetRootPath(instanceId, upstreamResponse);
         HttpHeaders responseHeaders = new HttpHeaders();
         upstreamResponse.headers().map().forEach((headerName, values) -> {
             if (shouldSkipResponseHeader(headerName)) {
@@ -208,10 +211,36 @@ public class UiControllerProxyController {
         });
 
         return new ResponseEntity<>(
-                upstreamResponse.body(),
+                responseBody,
                 responseHeaders,
                 HttpStatusCode.valueOf(upstreamResponse.statusCode())
         );
+    }
+
+    private byte[] rewriteUiAssetRootPath(UUID instanceId, HttpResponse<byte[]> upstreamResponse) {
+        String contentType = upstreamResponse.headers()
+                .firstValue("content-type")
+                .orElse("")
+                .toLowerCase(Locale.ROOT);
+
+        boolean rewritable = contentType.contains("text/html")
+                || contentType.contains("javascript")
+                || contentType.contains("application/json");
+        byte[] source = upstreamResponse.body();
+        if (!rewritable || source == null || source.length == 0) {
+            return source;
+        }
+
+        String raw = new String(source, StandardCharsets.UTF_8);
+        String uiBase = "/fun-claw/ui-controller/" + instanceId;
+        String rewritten = raw
+                .replace("\"/_app/", "\"" + uiBase + "/_app/")
+                .replace("'/_app/", "'" + uiBase + "/_app/");
+
+        if (rewritten.equals(raw)) {
+            return source;
+        }
+        return rewritten.getBytes(StandardCharsets.UTF_8);
     }
 
     private boolean shouldSkipRequestHeader(String headerName) {
