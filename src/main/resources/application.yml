@@ -32,6 +32,7 @@ app:
   ui-controller:
     upstream-scheme: ${UI_CONTROLLER_UPSTREAM_SCHEME:http}
     upstream-host: ${UI_CONTROLLER_UPSTREAM_HOST:127.0.0.1}
+    fixed-api-key: fun-ai-claw-fixed-2026
     request-timeout-seconds: ${UI_CONTROLLER_REQUEST_TIMEOUT_SECONDS:60}
   terminal:
     docker-command: ${TERMINAL_DOCKER_COMMAND:docker}

@@ -18,6 +18,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -64,15 +65,18 @@ public class UiControllerProxyController {
     private final HttpClient httpClient;
     private final String upstreamScheme;
     private final String upstreamHost;
+    private final String fixedApiKey;
     private final Duration requestTimeout;
 
     public UiControllerProxyController(InstanceRepository instanceRepository,
                                        @Value("${app.ui-controller.upstream-scheme:http}") String upstreamScheme,
                                        @Value("${app.ui-controller.upstream-host:127.0.0.1}") String upstreamHost,
+                                       @Value("${app.ui-controller.fixed-api-key:}") String fixedApiKey,
                                        @Value("${app.ui-controller.request-timeout-seconds:60}") long requestTimeoutSeconds) {
         this.instanceRepository = instanceRepository;
         this.upstreamScheme = normalizeScheme(upstreamScheme);
         this.upstreamHost = requireHost(upstreamHost);
+        this.fixedApiKey = normalizeFixedApiKey(fixedApiKey);
         long timeoutSeconds = requestTimeoutSeconds > 0 ? requestTimeoutSeconds : 60;
         this.requestTimeout = Duration.ofSeconds(timeoutSeconds);
         this.httpClient = HttpClient.newBuilder()
@@ -144,6 +148,7 @@ public class UiControllerProxyController {
         if (StringUtils.hasText(request.getQueryString())) {
             uriBuilder.append("?").append(request.getQueryString());
         }
+        appendFixedApiKeyQuery(uriBuilder, request.getQueryString());
         return URI.create(uriBuilder.toString());
     }
 
@@ -158,6 +163,7 @@ public class UiControllerProxyController {
                 .method(inboundRequest.getMethod(), bodyPublisher);
 
         copyRequestHeaders(inboundRequest, outboundBuilder);
+        applyFixedApiKeyHeaders(outboundBuilder);
         return outboundBuilder.build();
     }
 
@@ -267,5 +273,51 @@ public class UiControllerProxyController {
             throw new IllegalArgumentException("app.ui-controller.upstream-host must not be blank");
         }
         return host.trim();
+    }
+
+    private String normalizeFixedApiKey(String apiKey) {
+        if (!StringUtils.hasText(apiKey)) {
+            return null;
+        }
+        return apiKey.trim();
+    }
+
+    private void appendFixedApiKeyQuery(StringBuilder uriBuilder, String rawQuery) {
+        if (!StringUtils.hasText(fixedApiKey)) {
+            return;
+        }
+        if (containsApiKeyQuery(rawQuery)) {
+            return;
+        }
+        boolean hasQuery = StringUtils.hasText(rawQuery);
+        uriBuilder.append(hasQuery ? "&" : "?")
+                .append("api_key=")
+                .append(URLEncoder.encode(fixedApiKey, StandardCharsets.UTF_8));
+    }
+
+    private boolean containsApiKeyQuery(String rawQuery) {
+        if (!StringUtils.hasText(rawQuery)) {
+            return false;
+        }
+        String[] queryItems = rawQuery.split("&");
+        for (String queryItem : queryItems) {
+            if (!StringUtils.hasText(queryItem)) {
+                continue;
+            }
+            int delimiterIndex = queryItem.indexOf('=');
+            String key = delimiterIndex >= 0 ? queryItem.substring(0, delimiterIndex) : queryItem;
+            if ("api_key".equalsIgnoreCase(key) || "apikey".equalsIgnoreCase(key)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void applyFixedApiKeyHeaders(HttpRequest.Builder outboundBuilder) {
+        if (!StringUtils.hasText(fixedApiKey)) {
+            return;
+        }
+        outboundBuilder.setHeader("X-API-Key", fixedApiKey);
+        outboundBuilder.setHeader("Authorization", "Bearer " + fixedApiKey);
     }
 }
