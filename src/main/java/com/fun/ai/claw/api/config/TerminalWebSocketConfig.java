@@ -1,6 +1,7 @@
 package com.fun.ai.claw.api.config;
 
 import com.fun.ai.claw.api.service.TerminalWebSocketHandler;
+import com.fun.ai.claw.api.service.UiControllerHandshakeSnapshotInterceptor;
 import com.fun.ai.claw.api.service.UiControllerWebSocketProxyHandler;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
@@ -13,11 +14,14 @@ public class TerminalWebSocketConfig implements WebSocketConfigurer {
 
     private final TerminalWebSocketHandler terminalWebSocketHandler;
     private final UiControllerWebSocketProxyHandler uiControllerWebSocketProxyHandler;
+    private final UiControllerHandshakeSnapshotInterceptor uiControllerHandshakeSnapshotInterceptor;
 
     public TerminalWebSocketConfig(TerminalWebSocketHandler terminalWebSocketHandler,
-                                   UiControllerWebSocketProxyHandler uiControllerWebSocketProxyHandler) {
+                                   UiControllerWebSocketProxyHandler uiControllerWebSocketProxyHandler,
+                                   UiControllerHandshakeSnapshotInterceptor uiControllerHandshakeSnapshotInterceptor) {
         this.terminalWebSocketHandler = terminalWebSocketHandler;
         this.uiControllerWebSocketProxyHandler = uiControllerWebSocketProxyHandler;
+        this.uiControllerHandshakeSnapshotInterceptor = uiControllerHandshakeSnapshotInterceptor;
     }
 
     @Override
@@ -25,12 +29,13 @@ public class TerminalWebSocketConfig implements WebSocketConfigurer {
         registry.addHandler(terminalWebSocketHandler, "/v1/terminal/ws")
                 .setAllowedOriginPatterns("*");
 
-        registry.addHandler(
+                registry.addHandler(
                         uiControllerWebSocketProxyHandler,
                         "/fun-claw/ui-controller/*/ws/**",
                         "/ui-controller/*/ws/**",
                         "/ws/**"
                 )
+                .addInterceptors(uiControllerHandshakeSnapshotInterceptor)
                 .setAllowedOriginPatterns("*");
     }
 }

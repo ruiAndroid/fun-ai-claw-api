@@ -71,7 +71,8 @@ public class UiControllerWebSocketProxyHandler extends AbstractWebSocketHandler 
 
     @Override
     public void afterConnectionEstablished(WebSocketSession clientSession) throws Exception {
-        Optional<RouteTarget> routeTarget = resolveRouteTarget(clientSession);
+        HttpHeaders snapshotHeaders = getSnapshotHeaders(clientSession);
+        Optional<RouteTarget> routeTarget = resolveRouteTarget(clientSession, snapshotHeaders);
         if (routeTarget.isEmpty()) {
             safeClose(clientSession, CloseStatus.BAD_DATA);
             return;
@@ -90,7 +91,7 @@ public class UiControllerWebSocketProxyHandler extends AbstractWebSocketHandler 
         }
 
         URI targetUri = buildTargetUri(targetPort, routeTarget.get().downstreamPath(), clientSession.getUri());
-        WebSocketHttpHeaders outboundHeaders = copyHandshakeHeaders(clientSession.getHandshakeHeaders());
+        WebSocketHttpHeaders outboundHeaders = copyHandshakeHeaders(snapshotHeaders);
 
         ProxyContext context = new ProxyContext(clientSession);
         contexts.put(clientSession.getId(), context);
@@ -133,7 +134,7 @@ public class UiControllerWebSocketProxyHandler extends AbstractWebSocketHandler 
         closeAndCleanup(session.getId(), CloseStatus.SERVER_ERROR);
     }
 
-    private Optional<RouteTarget> resolveRouteTarget(WebSocketSession session) {
+    private Optional<RouteTarget> resolveRouteTarget(WebSocketSession session, HttpHeaders snapshotHeaders) {
         URI uri = session.getUri();
         if (uri == null || !StringUtils.hasText(uri.getPath())) {
             return Optional.empty();
@@ -156,7 +157,7 @@ public class UiControllerWebSocketProxyHandler extends AbstractWebSocketHandler 
             return Optional.empty();
         }
 
-        Optional<UUID> refererInstanceId = resolveInstanceIdFromReferer(session.getHandshakeHeaders().getFirst("Referer"));
+        Optional<UUID> refererInstanceId = resolveInstanceIdFromReferer(snapshotHeaders.getFirst("Referer"));
         if (refererInstanceId.isEmpty()) {
             return Optional.empty();
         }
@@ -214,6 +215,14 @@ public class UiControllerWebSocketProxyHandler extends AbstractWebSocketHandler 
             }
         }
         return outboundHeaders;
+    }
+
+    private HttpHeaders getSnapshotHeaders(WebSocketSession session) {
+        Object value = session.getAttributes().get(UiControllerHandshakeSnapshotInterceptor.ATTR_HANDSHAKE_HEADERS);
+        if (value instanceof HttpHeaders headers) {
+            return headers;
+        }
+        return HttpHeaders.copyOf(session.getHandshakeHeaders());
     }
 
     private void forwardToUpstream(String clientSessionId, org.springframework.web.socket.WebSocketMessage<?> message) {

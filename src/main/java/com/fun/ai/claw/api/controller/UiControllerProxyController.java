@@ -127,12 +127,30 @@ public class UiControllerProxyController {
         URI targetUri = buildTargetUri(instanceId, gatewayHostPort, request);
         HttpRequest outboundRequest = buildOutboundRequest(request, requestBody, targetUri);
         HttpResponse<byte[]> upstreamResponse = send(outboundRequest);
+        if (isConfigEndpoint(targetUri.getPath()) && upstreamResponse.statusCode() >= 500) {
+            String errorBody = upstreamResponse.body() == null
+                    ? ""
+                    : new String(upstreamResponse.body(), StandardCharsets.UTF_8);
+            log.warn("ui proxy /api/config upstream error status={}, uri={}, body={}",
+                    upstreamResponse.statusCode(),
+                    targetUri,
+                    errorBody);
+        }
         if (shouldRetryConfigSaveWithForcedPath(request, targetUri, upstreamResponse)) {
             URI retryUri = ensureConfigPathQueryPresent(targetUri);
             if (!retryUri.equals(targetUri)) {
                 log.warn("ui proxy retry /api/config with forced config_path: {}", retryUri);
                 HttpRequest retryRequest = buildOutboundRequest(request, requestBody, retryUri);
                 upstreamResponse = send(retryRequest);
+                if (upstreamResponse.statusCode() >= 500) {
+                    String retryErrorBody = upstreamResponse.body() == null
+                            ? ""
+                            : new String(upstreamResponse.body(), StandardCharsets.UTF_8);
+                    log.warn("ui proxy /api/config retry error status={}, uri={}, body={}",
+                            upstreamResponse.statusCode(),
+                            retryUri,
+                            retryErrorBody);
+                }
             }
         }
         return buildResponse(instanceId, upstreamResponse);
@@ -173,15 +191,40 @@ public class UiControllerProxyController {
 
     private String appendConfigPathQueryIfMissing(String queryString) {
         if (!StringUtils.hasText(queryString)) {
-            log.info("ui proxy append config_path for /api/config request");
-            return "config_path=" + ZEROCLAW_DEFAULT_CONFIG_PATH;
+            log.info("ui proxy append config path query for /api/config request");
+            return "config_path=" + ZEROCLAW_DEFAULT_CONFIG_PATH
+                    + "&configPath=" + ZEROCLAW_DEFAULT_CONFIG_PATH
+                    + "&path=" + ZEROCLAW_DEFAULT_CONFIG_PATH
+                    + "&file_path=" + ZEROCLAW_DEFAULT_CONFIG_PATH
+                    + "&filePath=" + ZEROCLAW_DEFAULT_CONFIG_PATH;
         }
         String lower = queryString.toLowerCase(Locale.ROOT);
-        if (lower.contains("config_path=") || lower.contains("configpath=")) {
+        boolean hasSnake = lower.contains("config_path=");
+        boolean hasCamel = lower.contains("configpath=");
+        boolean hasPath = lower.contains("path=");
+        boolean hasFileSnake = lower.contains("file_path=");
+        boolean hasFileCamel = lower.contains("filepath=");
+        if (hasSnake && hasCamel && hasPath && hasFileSnake && hasFileCamel) {
             return queryString;
         }
-        log.info("ui proxy append missing config_path for /api/config request");
-        return queryString + "&config_path=" + ZEROCLAW_DEFAULT_CONFIG_PATH;
+        log.info("ui proxy append missing config path fields for /api/config request");
+        StringBuilder builder = new StringBuilder(queryString);
+        if (!hasSnake) {
+            builder.append("&config_path=").append(ZEROCLAW_DEFAULT_CONFIG_PATH);
+        }
+        if (!hasCamel) {
+            builder.append("&configPath=").append(ZEROCLAW_DEFAULT_CONFIG_PATH);
+        }
+        if (!hasPath) {
+            builder.append("&path=").append(ZEROCLAW_DEFAULT_CONFIG_PATH);
+        }
+        if (!hasFileSnake) {
+            builder.append("&file_path=").append(ZEROCLAW_DEFAULT_CONFIG_PATH);
+        }
+        if (!hasFileCamel) {
+            builder.append("&filePath=").append(ZEROCLAW_DEFAULT_CONFIG_PATH);
+        }
+        return builder.toString();
     }
 
     private boolean isConfigEndpoint(String path) {
@@ -220,13 +263,39 @@ public class UiControllerProxyController {
     private URI ensureConfigPathQueryPresent(URI uri) {
         String query = uri.getRawQuery();
         if (!StringUtils.hasText(query)) {
-            return URI.create(uri.toString() + "?config_path=" + ZEROCLAW_DEFAULT_CONFIG_PATH);
+            return URI.create(uri.toString()
+                    + "?config_path=" + ZEROCLAW_DEFAULT_CONFIG_PATH
+                    + "&configPath=" + ZEROCLAW_DEFAULT_CONFIG_PATH
+                    + "&path=" + ZEROCLAW_DEFAULT_CONFIG_PATH
+                    + "&file_path=" + ZEROCLAW_DEFAULT_CONFIG_PATH
+                    + "&filePath=" + ZEROCLAW_DEFAULT_CONFIG_PATH);
         }
         String lower = query.toLowerCase(Locale.ROOT);
-        if (lower.contains("config_path=") || lower.contains("configpath=")) {
+        boolean hasSnake = lower.contains("config_path=");
+        boolean hasCamel = lower.contains("configpath=");
+        boolean hasPath = lower.contains("path=");
+        boolean hasFileSnake = lower.contains("file_path=");
+        boolean hasFileCamel = lower.contains("filepath=");
+        if (hasSnake && hasCamel && hasPath && hasFileSnake && hasFileCamel) {
             return uri;
         }
-        return URI.create(uri.toString() + "&config_path=" + ZEROCLAW_DEFAULT_CONFIG_PATH);
+        StringBuilder uriBuilder = new StringBuilder(uri.toString());
+        if (!hasSnake) {
+            uriBuilder.append("&config_path=").append(ZEROCLAW_DEFAULT_CONFIG_PATH);
+        }
+        if (!hasCamel) {
+            uriBuilder.append("&configPath=").append(ZEROCLAW_DEFAULT_CONFIG_PATH);
+        }
+        if (!hasPath) {
+            uriBuilder.append("&path=").append(ZEROCLAW_DEFAULT_CONFIG_PATH);
+        }
+        if (!hasFileSnake) {
+            uriBuilder.append("&file_path=").append(ZEROCLAW_DEFAULT_CONFIG_PATH);
+        }
+        if (!hasFileCamel) {
+            uriBuilder.append("&filePath=").append(ZEROCLAW_DEFAULT_CONFIG_PATH);
+        }
+        return URI.create(uriBuilder.toString());
     }
 
     private HttpRequest buildOutboundRequest(HttpServletRequest inboundRequest, byte[] requestBody, URI targetUri) {
