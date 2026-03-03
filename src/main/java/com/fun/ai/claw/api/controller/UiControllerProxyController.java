@@ -28,9 +28,13 @@ import java.util.Enumeration;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 @RestController
 public class UiControllerProxyController {
+    private static final String ZEROCLAW_DEFAULT_CONFIG_PATH = "/data/zeroclaw/config.toml";
+    private static final Pattern CONFIG_PATH_PATTERN = Pattern.compile("(?i)\"config_path\"\\s*:\\s*\"[^\"]*\"");
+    private static final Pattern CONFIG_PATH_CAMEL_PATTERN = Pattern.compile("(?i)\"configPath\"\\s*:\\s*\"[^\"]*\"");
 
     private static final Set<String> SKIPPED_REQUEST_HEADERS = Set.of(
             "host",
@@ -65,16 +69,19 @@ public class UiControllerProxyController {
     private final String upstreamScheme;
     private final String upstreamHost;
     private final Duration requestTimeout;
+    private final boolean forceConfigPathOnSave;
 
     public UiControllerProxyController(InstanceRepository instanceRepository,
                                        @Value("${app.ui-controller.upstream-scheme:http}") String upstreamScheme,
                                        @Value("${app.ui-controller.upstream-host:127.0.0.1}") String upstreamHost,
-                                       @Value("${app.ui-controller.request-timeout-seconds:60}") long requestTimeoutSeconds) {
+                                       @Value("${app.ui-controller.request-timeout-seconds:60}") long requestTimeoutSeconds,
+                                       @Value("${app.ui-controller.force-config-path-on-save:true}") boolean forceConfigPathOnSave) {
         this.instanceRepository = instanceRepository;
         this.upstreamScheme = normalizeScheme(upstreamScheme);
         this.upstreamHost = requireHost(upstreamHost);
         long timeoutSeconds = requestTimeoutSeconds > 0 ? requestTimeoutSeconds : 60;
         this.requestTimeout = Duration.ofSeconds(timeoutSeconds);
+        this.forceConfigPathOnSave = forceConfigPathOnSave;
         this.httpClient = HttpClient.newBuilder()
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .build();
@@ -135,6 +142,11 @@ public class UiControllerProxyController {
             }
         }
 
+        String queryString = request.getQueryString();
+        if ("/api/config".equals(downstreamPath) || "/api/config/".equals(downstreamPath)) {
+            queryString = appendConfigPathQueryIfMissing(queryString);
+        }
+
         StringBuilder uriBuilder = new StringBuilder()
                 .append(upstreamScheme)
                 .append("://")
@@ -142,16 +154,28 @@ public class UiControllerProxyController {
                 .append(":")
                 .append(targetPort)
                 .append(downstreamPath);
-        if (StringUtils.hasText(request.getQueryString())) {
-            uriBuilder.append("?").append(request.getQueryString());
+        if (StringUtils.hasText(queryString)) {
+            uriBuilder.append("?").append(queryString);
         }
         return URI.create(uriBuilder.toString());
     }
 
+    private String appendConfigPathQueryIfMissing(String queryString) {
+        if (!StringUtils.hasText(queryString)) {
+            return "config_path=" + ZEROCLAW_DEFAULT_CONFIG_PATH;
+        }
+        String lower = queryString.toLowerCase(Locale.ROOT);
+        if (lower.contains("config_path=") || lower.contains("configpath=")) {
+            return queryString;
+        }
+        return queryString + "&config_path=" + ZEROCLAW_DEFAULT_CONFIG_PATH;
+    }
+
     private HttpRequest buildOutboundRequest(HttpServletRequest inboundRequest, byte[] requestBody, URI targetUri) {
-        HttpRequest.BodyPublisher bodyPublisher = (requestBody == null || requestBody.length == 0)
+        byte[] normalizedBody = rewriteConfigSavePayloadIfNeeded(inboundRequest, requestBody, targetUri);
+        HttpRequest.BodyPublisher bodyPublisher = (normalizedBody == null || normalizedBody.length == 0)
                 ? HttpRequest.BodyPublishers.noBody()
-                : HttpRequest.BodyPublishers.ofByteArray(requestBody);
+                : HttpRequest.BodyPublishers.ofByteArray(normalizedBody);
 
         HttpRequest.Builder outboundBuilder = HttpRequest.newBuilder()
                 .uri(targetUri)
@@ -160,6 +184,49 @@ public class UiControllerProxyController {
 
         copyRequestHeaders(inboundRequest, outboundBuilder);
         return outboundBuilder.build();
+    }
+
+    private byte[] rewriteConfigSavePayloadIfNeeded(HttpServletRequest inboundRequest, byte[] requestBody, URI targetUri) {
+        if (!forceConfigPathOnSave) {
+            return requestBody;
+        }
+        if (requestBody == null || requestBody.length == 0 || targetUri == null) {
+            return requestBody;
+        }
+        String method = inboundRequest.getMethod();
+        if (!"POST".equalsIgnoreCase(method) && !"PUT".equalsIgnoreCase(method) && !"PATCH".equalsIgnoreCase(method)) {
+            return requestBody;
+        }
+        if (!"/api/config".equals(targetUri.getPath())) {
+            return requestBody;
+        }
+        String contentType = inboundRequest.getContentType();
+        if (!StringUtils.hasText(contentType) || !contentType.toLowerCase(Locale.ROOT).contains("application/json")) {
+            return requestBody;
+        }
+
+        String raw = new String(requestBody, StandardCharsets.UTF_8);
+        String rewritten = CONFIG_PATH_PATTERN.matcher(raw)
+                .replaceAll("\"config_path\":\"" + ZEROCLAW_DEFAULT_CONFIG_PATH + "\"");
+        rewritten = CONFIG_PATH_CAMEL_PATTERN.matcher(rewritten)
+                .replaceAll("\"configPath\":\"" + ZEROCLAW_DEFAULT_CONFIG_PATH + "\"");
+
+        if (rewritten.equals(raw) && rewritten.trim().endsWith("}")) {
+            String suffix = rewritten.trim();
+            int braceIndex = rewritten.lastIndexOf('}');
+            if (braceIndex > 0) {
+                boolean hasFields = suffix.length() > 2 && suffix.charAt(0) == '{';
+                String insertion = hasFields
+                        ? ",\"config_path\":\"" + ZEROCLAW_DEFAULT_CONFIG_PATH + "\""
+                        : "\"config_path\":\"" + ZEROCLAW_DEFAULT_CONFIG_PATH + "\"";
+                rewritten = rewritten.substring(0, braceIndex) + insertion + rewritten.substring(braceIndex);
+            }
+        }
+
+        if (rewritten.equals(raw)) {
+            return requestBody;
+        }
+        return rewritten.getBytes(StandardCharsets.UTF_8);
     }
 
     private void copyRequestHeaders(HttpServletRequest inboundRequest, HttpRequest.Builder outboundBuilder) {
