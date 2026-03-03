@@ -26,9 +26,13 @@ app:
   gateway:
     port-range-start: ${GATEWAY_PORT_RANGE_START:42617}
     port-range-end: ${GATEWAY_PORT_RANGE_END:42717}
-    url-template: ${GATEWAY_URL_TEMPLATE:http://172.21.138.98:{port}}
+    url-template: ${GATEWAY_URL_TEMPLATE:http://8.152.159.249:80/fun-claw/ui-controller/{instanceId}}
   remote-connect:
-    command-template: ${REMOTE_CONNECT_COMMAND_TEMPLATE:ssh root@172.21.138.98 "docker exec -it funclaw-{instanceId} /bin/busybox sh"}
+    command-template: ${REMOTE_CONNECT_COMMAND_TEMPLATE:ssh root@8.152.159.249 "docker exec -it funclaw-{instanceId} /bin/busybox sh"}
+  ui-controller:
+    upstream-scheme: ${UI_CONTROLLER_UPSTREAM_SCHEME:http}
+    upstream-host: ${UI_CONTROLLER_UPSTREAM_HOST:127.0.0.1}
+    request-timeout-seconds: ${UI_CONTROLLER_REQUEST_TIMEOUT_SECONDS:60}
   terminal:
     docker-command: ${TERMINAL_DOCKER_COMMAND:docker}
     container-prefix: ${TERMINAL_CONTAINER_PREFIX:funclaw}
