@@ -236,6 +236,12 @@ public class UiControllerProxyController {
         String rewritten = raw
                 .replace("\"/_app/", "\"" + uiBase + "/_app/")
                 .replace("'/_app/", "'" + uiBase + "/_app/")
+                .replace("\"/api/\"", "\"" + uiBase + "/api/\"")
+                .replace("'/api/'", "'" + uiBase + "/api/'")
+                .replace("\"/api/", "\"" + uiBase + "/api/")
+                .replace("'/api/", "'" + uiBase + "/api/")
+                .replace("\"/api\"", "\"" + uiBase + "/api\"")
+                .replace("'/api'", "'" + uiBase + "/api'")
                 .replace("action=\"/pair\"", "action=\"" + uiBase + "/pair\"")
                 .replace("action='/pair'", "action='" + uiBase + "/pair'")
                 .replace("\"/pair\"", "\"" + uiBase + "/pair\"")
