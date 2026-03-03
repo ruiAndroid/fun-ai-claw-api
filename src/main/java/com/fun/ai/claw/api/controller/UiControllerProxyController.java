@@ -108,6 +108,8 @@ public class UiControllerProxyController {
         this.httpClient = HttpClient.newBuilder()
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .build();
+        log.info("ui proxy config-save fallback enabled={}, dockerCommand={}, containerPrefix={}, fallbackPath={}",
+                this.configSaveFallbackEnabled, this.dockerCommand, this.containerPrefix, this.configSaveFallbackPath);
     }
 
     @RequestMapping(
@@ -174,12 +176,14 @@ public class UiControllerProxyController {
             }
         }
         if (shouldApplyDirectConfigSaveFallback(request, targetUri, requestBody, upstreamResponse)) {
+            log.warn("ui proxy trigger config-save fallback for instanceId={}, uri={}", instanceId, targetUri);
             if (saveConfigFileToContainer(instanceId, requestBody)) {
                 HttpHeaders fallbackHeaders = new HttpHeaders();
                 fallbackHeaders.set(HttpHeaders.CONTENT_TYPE, "application/json");
                 byte[] body = "{\"saved\":true,\"source\":\"ui-proxy-fallback\"}".getBytes(StandardCharsets.UTF_8);
                 return new ResponseEntity<>(body, fallbackHeaders, HttpStatusCode.valueOf(200));
             }
+            log.warn("ui proxy fallback execution failed for instanceId={}, uri={}", instanceId, targetUri);
         }
         return buildResponse(instanceId, upstreamResponse);
     }
@@ -331,23 +335,30 @@ public class UiControllerProxyController {
                                                         byte[] requestBody,
                                                         HttpResponse<byte[]> upstreamResponse) {
         if (!configSaveFallbackEnabled || targetUri == null || requestBody == null || requestBody.length == 0) {
+            log.info("ui proxy skip fallback: enabled={}, hasUri={}, hasBody={}",
+                    configSaveFallbackEnabled, targetUri != null, requestBody != null && requestBody.length > 0);
             return false;
         }
         if (!isConfigEndpoint(targetUri.getPath())) {
+            log.info("ui proxy skip fallback: non config endpoint path={}", targetUri.getPath());
             return false;
         }
         String method = inboundRequest.getMethod();
         if (!"PUT".equalsIgnoreCase(method) && !"POST".equalsIgnoreCase(method) && !"PATCH".equalsIgnoreCase(method)) {
+            log.info("ui proxy skip fallback: unsupported method={}", method);
             return false;
         }
         if (upstreamResponse == null || upstreamResponse.statusCode() < 500) {
+            log.info("ui proxy skip fallback: upstream status={}", upstreamResponse == null ? -1 : upstreamResponse.statusCode());
             return false;
         }
         byte[] body = upstreamResponse.body();
         if (body == null || body.length == 0) {
+            log.info("ui proxy skip fallback: empty upstream error body");
             return false;
         }
         String errorText = new String(body, StandardCharsets.UTF_8).toLowerCase(Locale.ROOT);
+        log.info("ui proxy fallback check upstream error={}", errorText);
         return errorText.contains("config path must have a parent directory");
     }
 
