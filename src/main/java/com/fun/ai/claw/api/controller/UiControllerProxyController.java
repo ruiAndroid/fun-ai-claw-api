@@ -309,8 +309,13 @@ public class UiControllerProxyController {
                     return base + path;
                   }
                   function rewriteUrlLike(url) {
+                    if (typeof url === 'undefined' || url === null) { return url; }
+                    if (typeof URL !== 'undefined' && url instanceof URL) {
+                      return rewriteUrlLike(url.toString());
+                    }
                     if (typeof url !== 'string' || !url) { return url; }
                     if (url.indexOf('//') === 0) { return url; }
+                    if (url.charAt(0) === '#') { return url; }
                     if (isHttpUrl(url) || isWsUrl(url)) {
                       try {
                         var parsed = new URL(url, window.location.origin);
@@ -323,6 +328,52 @@ public class UiControllerProxyController {
                       }
                     }
                     return prefixPath(url);
+                  }
+                  var historyApi = window.history;
+                  if (historyApi) {
+                    var nativePushState = historyApi.pushState;
+                    if (typeof nativePushState === 'function') {
+                      historyApi.pushState = function (state, title, url) {
+                        var args = Array.prototype.slice.call(arguments);
+                        if (args.length > 2) {
+                          args[2] = rewriteUrlLike(args[2]);
+                        }
+                        return nativePushState.apply(this, args);
+                      };
+                    }
+                    var nativeReplaceState = historyApi.replaceState;
+                    if (typeof nativeReplaceState === 'function') {
+                      historyApi.replaceState = function (state, title, url) {
+                        var args = Array.prototype.slice.call(arguments);
+                        if (args.length > 2) {
+                          args[2] = rewriteUrlLike(args[2]);
+                        }
+                        return nativeReplaceState.apply(this, args);
+                      };
+                    }
+                  }
+                  function patchLocationMethod(methodName) {
+                    try {
+                      var fn = window.location && window.location[methodName];
+                      if (typeof fn !== 'function') { return; }
+                      window.location[methodName] = function (url) {
+                        return fn.call(window.location, rewriteUrlLike(url));
+                      };
+                    } catch (e) {
+                      // Some browsers expose non-writable Location methods.
+                    }
+                  }
+                  patchLocationMethod('assign');
+                  patchLocationMethod('replace');
+                  var nativeOpen = window.open;
+                  if (typeof nativeOpen === 'function') {
+                    window.open = function (url) {
+                      var args = Array.prototype.slice.call(arguments);
+                      if (args.length > 0) {
+                        args[0] = rewriteUrlLike(args[0]);
+                      }
+                      return nativeOpen.apply(this, args);
+                    };
                   }
                   var originalFetch = window.fetch;
                   if (typeof originalFetch === 'function') {
@@ -374,11 +425,40 @@ public class UiControllerProxyController {
                       }
                     }
                   }
-                  if (doc.readyState === 'loading') {
-                    doc.addEventListener('DOMContentLoaded', function () { rewriteForms(doc); });
-                  } else {
-                    rewriteForms(doc);
+                  function rewriteAnchors(root) {
+                    if (!root || !root.querySelectorAll) { return; }
+                    var anchors = root.querySelectorAll('a[href]');
+                    for (var i = 0; i < anchors.length; i++) {
+                      var current = anchors[i].getAttribute('href');
+                      var next = rewriteUrlLike(current);
+                      if (next !== current) {
+                        anchors[i].setAttribute('href', next);
+                      }
+                    }
                   }
+                  function rewriteDomTargets(root) {
+                    rewriteForms(root);
+                    rewriteAnchors(root);
+                  }
+                  if (doc.readyState === 'loading') {
+                    doc.addEventListener('DOMContentLoaded', function () { rewriteDomTargets(doc); });
+                  } else {
+                    rewriteDomTargets(doc);
+                  }
+                  doc.addEventListener('click', function (event) {
+                    var node = event.target;
+                    while (node && node.nodeType === 1) {
+                      if (node.tagName === 'A') {
+                        var current = node.getAttribute('href');
+                        var next = rewriteUrlLike(current);
+                        if (next !== current) {
+                          node.setAttribute('href', next);
+                        }
+                        break;
+                      }
+                      node = node.parentElement;
+                    }
+                  }, true);
                   if (window.MutationObserver && doc.documentElement) {
                     var observer = new MutationObserver(function (mutations) {
                       for (var i = 0; i < mutations.length; i++) {
@@ -386,7 +466,7 @@ public class UiControllerProxyController {
                         for (var j = 0; j < addedNodes.length; j++) {
                           var node = addedNodes[j];
                           if (node && node.nodeType === 1) {
-                            rewriteForms(node);
+                            rewriteDomTargets(node);
                           }
                         }
                       }
