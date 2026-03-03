@@ -24,13 +24,13 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Enumeration;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 
 @RestController
 public class UiControllerProxyController {
 
-    private static final String PROXY_BASE_PATH = "/fun-claw/ui-controller";
     private static final Set<String> SKIPPED_REQUEST_HEADERS = Set.of(
             "host",
             "content-length",
@@ -81,7 +81,11 @@ public class UiControllerProxyController {
     @RequestMapping(
             path = {
                     "/fun-claw/ui-controller/{instanceId}",
-                    "/fun-claw/ui-controller/{instanceId}/**"
+                    "/fun-claw/ui-controller/{instanceId}/**",
+                    "/ui-controller/{instanceId}",
+                    "/ui-controller/{instanceId}/**",
+                    "/{instanceId:[0-9a-fA-F\\-]{36}}",
+                    "/{instanceId:[0-9a-fA-F\\-]{36}}/**"
             },
             method = {
                     RequestMethod.GET,
@@ -115,12 +119,16 @@ public class UiControllerProxyController {
 
     private URI buildTargetUri(UUID instanceId, int targetPort, HttpServletRequest request) {
         String requestUri = request.getRequestURI();
-        String prefix = PROXY_BASE_PATH + "/" + instanceId;
         String downstreamPath = "/";
-        if (requestUri.length() > prefix.length()) {
-            downstreamPath = requestUri.substring(prefix.length());
-            if (!downstreamPath.startsWith("/")) {
-                downstreamPath = "/" + downstreamPath;
+        String marker = "/" + instanceId;
+        int markerIndex = requestUri.indexOf(marker);
+        if (markerIndex >= 0) {
+            int downstreamStart = markerIndex + marker.length();
+            if (requestUri.length() > downstreamStart) {
+                downstreamPath = requestUri.substring(downstreamStart);
+                if (!downstreamPath.startsWith("/")) {
+                    downstreamPath = "/" + downstreamPath;
+                }
             }
         }
 
@@ -207,11 +215,11 @@ public class UiControllerProxyController {
     }
 
     private boolean shouldSkipRequestHeader(String headerName) {
-        return SKIPPED_REQUEST_HEADERS.contains(headerName.toLowerCase());
+        return SKIPPED_REQUEST_HEADERS.contains(headerName.toLowerCase(Locale.ROOT));
     }
 
     private boolean shouldSkipResponseHeader(String headerName) {
-        return SKIPPED_RESPONSE_HEADERS.contains(headerName.toLowerCase());
+        return SKIPPED_RESPONSE_HEADERS.contains(headerName.toLowerCase(Locale.ROOT));
     }
 
     private String normalizeScheme(String scheme) {
