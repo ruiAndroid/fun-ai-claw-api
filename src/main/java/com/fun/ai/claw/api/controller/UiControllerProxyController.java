@@ -26,6 +26,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Enumeration;
 import java.util.Locale;
 import java.util.Set;
@@ -152,6 +153,9 @@ public class UiControllerProxyController {
                             retryErrorBody);
                 }
             }
+        }
+        if (shouldRetryConfigSaveWithJsonContract(request, targetUri, requestBody, upstreamResponse)) {
+            upstreamResponse = retryConfigSaveAsJson(request, targetUri, requestBody);
         }
         return buildResponse(instanceId, upstreamResponse);
     }
@@ -298,7 +302,93 @@ public class UiControllerProxyController {
         return URI.create(uriBuilder.toString());
     }
 
+    private boolean shouldRetryConfigSaveWithJsonContract(HttpServletRequest inboundRequest,
+                                                          URI targetUri,
+                                                          byte[] requestBody,
+                                                          HttpResponse<byte[]> upstreamResponse) {
+        if (targetUri == null || requestBody == null || requestBody.length == 0) {
+            return false;
+        }
+        if (!isConfigEndpoint(targetUri.getPath())) {
+            return false;
+        }
+        String method = inboundRequest.getMethod();
+        if (!"PUT".equalsIgnoreCase(method) && !"POST".equalsIgnoreCase(method) && !"PATCH".equalsIgnoreCase(method)) {
+            return false;
+        }
+        if (!isConfigPathParentError(upstreamResponse)) {
+            return false;
+        }
+        String contentType = inboundRequest.getContentType();
+        boolean json = StringUtils.hasText(contentType) && contentType.toLowerCase(Locale.ROOT).contains("application/json");
+        return !json;
+    }
+
+    private HttpResponse<byte[]> retryConfigSaveAsJson(HttpServletRequest inboundRequest,
+                                                       URI targetUri,
+                                                       byte[] requestBody) {
+        String rawToml = new String(requestBody, StandardCharsets.UTF_8);
+        String escapedToml = escapeJson(rawToml);
+        java.util.List<String> payloadCandidates = Arrays.asList(
+                "{\"config\":\"" + escapedToml + "\",\"config_path\":\"" + ZEROCLAW_DEFAULT_CONFIG_PATH + "\"}",
+                "{\"config\":\"" + escapedToml + "\",\"configPath\":\"" + ZEROCLAW_DEFAULT_CONFIG_PATH + "\"}",
+                "{\"toml\":\"" + escapedToml + "\",\"path\":\"" + ZEROCLAW_DEFAULT_CONFIG_PATH + "\"}",
+                "{\"content\":\"" + escapedToml + "\",\"file_path\":\"" + ZEROCLAW_DEFAULT_CONFIG_PATH + "\"}",
+                "{\"data\":\"" + escapedToml + "\",\"path\":\"" + ZEROCLAW_DEFAULT_CONFIG_PATH + "\"}"
+        );
+
+        HttpResponse<byte[]> lastResponse = null;
+        URI retryUri = ensureConfigPathQueryPresent(targetUri);
+        for (int i = 0; i < payloadCandidates.size(); i++) {
+            byte[] payload = payloadCandidates.get(i).getBytes(StandardCharsets.UTF_8);
+            HttpRequest retryRequest = buildOutboundRequest(inboundRequest, payload, retryUri, "application/json");
+            HttpResponse<byte[]> response = send(retryRequest);
+            lastResponse = response;
+            if (!isConfigPathParentError(response)) {
+                log.info("ui proxy /api/config json contract retry succeeded with candidate {}", i + 1);
+                return response;
+            }
+            String body = response.body() == null ? "" : new String(response.body(), StandardCharsets.UTF_8);
+            log.warn("ui proxy /api/config json contract retry failed candidate={}, status={}, body={}",
+                    i + 1,
+                    response.statusCode(),
+                    body);
+        }
+        return lastResponse;
+    }
+
+    private boolean isConfigPathParentError(HttpResponse<byte[]> response) {
+        if (response == null || response.statusCode() < 500) {
+            return false;
+        }
+        byte[] body = response.body();
+        if (body == null || body.length == 0) {
+            return false;
+        }
+        String errorText = new String(body, StandardCharsets.UTF_8).toLowerCase(Locale.ROOT);
+        return errorText.contains("config path must have a parent directory");
+    }
+
+    private String escapeJson(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\r", "\\r")
+                .replace("\n", "\\n")
+                .replace("\t", "\\t");
+    }
+
     private HttpRequest buildOutboundRequest(HttpServletRequest inboundRequest, byte[] requestBody, URI targetUri) {
+        return buildOutboundRequest(inboundRequest, requestBody, targetUri, null);
+    }
+
+    private HttpRequest buildOutboundRequest(HttpServletRequest inboundRequest,
+                                             byte[] requestBody,
+                                             URI targetUri,
+                                             String forcedContentType) {
         byte[] normalizedBody = rewriteConfigSavePayloadIfNeeded(inboundRequest, requestBody, targetUri);
         HttpRequest.BodyPublisher bodyPublisher = (normalizedBody == null || normalizedBody.length == 0)
                 ? HttpRequest.BodyPublishers.noBody()
@@ -310,6 +400,9 @@ public class UiControllerProxyController {
                 .method(inboundRequest.getMethod(), bodyPublisher);
 
         copyRequestHeaders(inboundRequest, outboundBuilder);
+        if (StringUtils.hasText(forcedContentType)) {
+            outboundBuilder.setHeader("Content-Type", forcedContentType);
+        }
         return outboundBuilder.build();
     }
 
