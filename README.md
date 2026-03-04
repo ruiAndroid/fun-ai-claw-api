@@ -24,6 +24,18 @@ Default database config is in `src/main/resources/application.yml` and points to
 
 Schema is auto-initialized at startup via `src/main/resources/schema.sql`.
 
+## File-based private config
+
+`application.yml` now imports optional local file:
+
+- `./application-private.yml`
+
+Recommended:
+
+1. Copy `application-private.example.yml` to `application-private.yml`
+2. Fill your real `app.llm-gateway.auth-token`
+3. Keep `application-private.yml` out of git (already in `.gitignore`)
+
 ## Current Scope
 
 - `GET /v1/health`
@@ -78,6 +90,14 @@ Configuration (`src/main/resources/application.yml`):
 - `LLM_GATEWAY_AUTH_SCHEME` (default: `Bearer`)
 - `LLM_GATEWAY_TIMEOUT_SECONDS` (default: `120`)
 - `LLM_GATEWAY_PREFER_INCOMING_AUTHORIZATION` (default: `true`)
+
+Or use file config (`application-private.yml`) with the same keys under:
+
+- `app.llm-gateway.base-url`
+- `app.llm-gateway.auth-token`
+- `app.llm-gateway.auth-scheme`
+- `app.llm-gateway.timeout-seconds`
+- `app.llm-gateway.prefer-incoming-authorization`
 
 Behavior:
 
