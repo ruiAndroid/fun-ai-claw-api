@@ -737,6 +737,15 @@ public class UiControllerProxyController {
                     return true;
                   }
                   if (tryApplyAutoAuthToken()) { return; }
+                  // No-pairing mode fallback: ensure UI has a local token placeholder.
+                  try {
+                    var existingToken = window.localStorage.getItem('zeroclaw_token');
+                    if (!existingToken) {
+                      window.localStorage.setItem('zeroclaw_token', 'public-access');
+                    }
+                  } catch (e) {
+                    // ignore storage errors and continue normal flow
+                  }
                   function isHttpUrl(url) { return /^https?:\\/\\//i.test(url); }
                   function isWsUrl(url) { return /^wss?:\\/\\//i.test(url); }
                   function prefixPath(path) {
