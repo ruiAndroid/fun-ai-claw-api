@@ -34,10 +34,8 @@ app:
     upstream-host: ${UI_CONTROLLER_UPSTREAM_HOST:127.0.0.1}
     request-timeout-seconds: ${UI_CONTROLLER_REQUEST_TIMEOUT_SECONDS:60}
   pairing-code:
-    log-tail-lines: 300
-    command-timeout-seconds: 8
-    fetch-attempts: 4
-    fetch-retry-interval-millis: 1000
+    fixed-code: ${PAIRING_FIXED_CODE:809394}
+    fixed-link-path: ${PAIRING_FIXED_LINK_PATH:/pair}
   terminal:
     docker-command: ${TERMINAL_DOCKER_COMMAND:docker}
     container-prefix: ${TERMINAL_CONTAINER_PREFIX:funclaw}

@@ -32,6 +32,15 @@ Schema is auto-initialized at startup via `src/main/resources/schema.sql`.
 - `POST /v1/instances`
 - `DELETE /v1/instances/{instanceId}`
 - `POST /v1/instances/{instanceId}/actions`
+- `GET /v1/models`
+- `POST /v1/chat/completions`
+- `POST /v1/messages`
+
+Compatible aliases:
+
+- `GET /api/v1/models`
+- `POST /api/v1/chat/completions`
+- `POST /api/v1/messages`
 
 ## Runtime Image Presets
 
@@ -56,6 +65,24 @@ app:
   - `PLANE_BASE_URL` (default: `http://127.0.0.1:8090/internal/v1`)
   - `PLANE_REQUESTED_BY` (default: `fun-ai-claw-api`)
 - Set `ZEROCLAW_PRESET_IMAGE` in deployment env to point to your own registry mirror.
+
+## LLM Data API
+
+This service now exposes a unified LLM data plane for agents.
+Agents should call `fun-ai-claw-api` endpoints instead of calling vendor APIs directly.
+
+Configuration (`src/main/resources/application.yml`):
+
+- `LLM_GATEWAY_BASE_URL` (default: `https://api.ai.fun.tv/v1`)
+- `LLM_GATEWAY_AUTH_TOKEN` (default: empty)
+- `LLM_GATEWAY_AUTH_SCHEME` (default: `Bearer`)
+- `LLM_GATEWAY_TIMEOUT_SECONDS` (default: `120`)
+- `LLM_GATEWAY_PREFER_INCOMING_AUTHORIZATION` (default: `true`)
+
+Behavior:
+
+- If `LLM_GATEWAY_PREFER_INCOMING_AUTHORIZATION=true` and request includes `Authorization`, forward it upstream.
+- Otherwise use configured `LLM_GATEWAY_AUTH_TOKEN`.
 
 ## Update Script
 

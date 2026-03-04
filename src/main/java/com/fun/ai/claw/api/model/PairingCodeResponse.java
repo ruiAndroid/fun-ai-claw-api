@@ -6,9 +6,9 @@ import java.util.UUID;
 public record PairingCodeResponse(
         UUID instanceId,
         String pairingCode,
+        String pairingLink,
         String sourceLine,
         String note,
         Instant fetchedAt
 ) {
 }
-
