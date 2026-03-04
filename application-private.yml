@@ -1,0 +1,12 @@
+app:
+  llm-gateway:
+    # Unified upstream LLM gateway base URL (must include /v1).
+    base-url: https://api.ai.fun.tv/v1
+    # Put real token here; do not commit application-private.yml.
+    auth-token: sk-KDjR9i0eKQeYnpxAvpF3GrJUBezsyE4U8Fk7ajj706LkPhZy
+    auth-scheme: Bearer
+    timeout-seconds: 120
+    # false = always use auth-token from this config file.
+    # true  = if incoming request has Authorization, forward it.
+    prefer-incoming-authorization: false
+
