@@ -95,6 +95,16 @@ public class PairingCodeService {
         }
 
         String pairingLink = buildPairingLink(gatewayUrl);
+        if (isUnauthenticatedAccessAvailable(gatewayUrl)) {
+            return new PairingCodeResponse(
+                    instance.id(),
+                    null,
+                    pairingLink,
+                    null,
+                    "pairing is disabled (require_pairing=false), open link directly",
+                    fetchedAt
+            );
+        }
         List<String> candidateTokens = readPairedTokens(instance.id());
         String usableToken = findUsableToken(candidateTokens, gatewayUrl);
 
@@ -231,6 +241,21 @@ public class PairingCodeService {
             normalized = normalized.substring(0, normalized.length() - 1);
         }
         return normalized + "/api/status";
+    }
+
+    private boolean isUnauthenticatedAccessAvailable(String gatewayUrl) {
+        try {
+            URI statusUri = URI.create(buildApiStatusEndpoint(gatewayUrl));
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(statusUri)
+                    .timeout(authProbeTimeout)
+                    .GET()
+                    .build();
+            HttpResponse<Void> response = authProbeClient.send(request, HttpResponse.BodyHandlers.discarding());
+            return response.statusCode() >= 200 && response.statusCode() < 300;
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     private CommandResult runCommand(String... command) {

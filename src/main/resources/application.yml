@@ -42,7 +42,7 @@ app:
     timeout-seconds: ${LLM_GATEWAY_TIMEOUT_SECONDS:120}
     prefer-incoming-authorization: ${LLM_GATEWAY_PREFER_INCOMING_AUTHORIZATION:true}
   pairing-code:
-    fixed-code: 809393
+    fixed-code: ""
     fixed-link-path: /
     auto-auth-query-param: autoAuth
     auth-token-query-param: authToken
