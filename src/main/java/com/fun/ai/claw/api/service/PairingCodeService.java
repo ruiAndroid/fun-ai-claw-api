@@ -11,10 +11,19 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.net.URI;
 import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
@@ -23,7 +32,8 @@ import java.util.regex.Pattern;
 @Service
 public class PairingCodeService {
 
-    private static final Pattern PAIRED_TOKENS_PATTERN = Pattern.compile("(?s)\\bpaired_tokens\\s*=\\s*\\[(.*?)]");
+    private static final Pattern PAIRED_TOKENS_PATTERN = Pattern.compile("(?is)\\bpaired_tokens\\s*=\\s*\\[(.*?)]");
+    private static final Pattern TOKEN_FIELD_PATTERN = Pattern.compile("(?is)\\btoken\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
     private static final Pattern QUOTED_STRING_PATTERN = Pattern.compile("\"((?:\\\\.|[^\"\\\\])*)\"");
 
     private final InstanceRepository instanceRepository;
@@ -36,6 +46,8 @@ public class PairingCodeService {
     private final String containerPrefix;
     private final String gatewayConfigPath;
     private final long commandTimeoutSeconds;
+    private final Duration authProbeTimeout;
+    private final HttpClient authProbeClient;
 
     public PairingCodeService(InstanceRepository instanceRepository,
                               @Value("${app.pairing-code.fixed-code:809393}") String fixedPairingCode,
@@ -46,6 +58,7 @@ public class PairingCodeService {
                               @Value("${app.pairing-code.container-prefix:funclaw}") String containerPrefix,
                               @Value("${app.pairing-code.gateway-config-path:/data/zeroclaw/config.toml}") String gatewayConfigPath,
                               @Value("${app.pairing-code.command-timeout-seconds:8}") long commandTimeoutSeconds,
+                              @Value("${app.pairing-code.auth-probe-timeout-seconds:5}") long authProbeTimeoutSeconds,
                               @Value("${app.gateway.url-template:http://8.152.159.249:80/fun-claw/ui-controller/{instanceId}}") String gatewayUrlTemplate) {
         this.instanceRepository = instanceRepository;
         this.fixedPairingCode = fixedPairingCode == null ? "" : fixedPairingCode.trim();
@@ -56,6 +69,11 @@ public class PairingCodeService {
         this.containerPrefix = StringUtils.hasText(containerPrefix) ? containerPrefix.trim() : "funclaw";
         this.gatewayConfigPath = StringUtils.hasText(gatewayConfigPath) ? gatewayConfigPath.trim() : "/data/zeroclaw/config.toml";
         this.commandTimeoutSeconds = commandTimeoutSeconds > 0 ? commandTimeoutSeconds : 8;
+        long probeSeconds = authProbeTimeoutSeconds > 0 ? authProbeTimeoutSeconds : 5;
+        this.authProbeTimeout = Duration.ofSeconds(probeSeconds);
+        this.authProbeClient = HttpClient.newBuilder()
+                .connectTimeout(this.authProbeTimeout)
+                .build();
         this.gatewayUrlTemplate = gatewayUrlTemplate;
     }
 
@@ -77,15 +95,17 @@ public class PairingCodeService {
         }
 
         String pairingLink = buildPairingLink(gatewayUrl);
-        String pairedToken = readFirstPairedToken(instance.id());
-        if (StringUtils.hasText(pairedToken)) {
+        List<String> candidateTokens = readPairedTokens(instance.id());
+        String usableToken = findUsableToken(candidateTokens, gatewayUrl);
+
+        if (StringUtils.hasText(usableToken)) {
             String tokenLink = appendQueryParam(pairingLink, autoAuthQueryParam, "1");
-            tokenLink = appendQueryParam(tokenLink, authTokenQueryParam, pairedToken);
+            tokenLink = appendQueryParam(tokenLink, authTokenQueryParam, usableToken);
             return new PairingCodeResponse(
                     instance.id(),
                     fixedPairingCode,
                     tokenLink,
-                    "Authorization: Bearer <auto login token from container config>",
+                    "Authorization: Bearer <validated token>",
                     "open pairing link for direct auto-login (no /pair request needed)",
                     fetchedAt
             );
@@ -97,7 +117,9 @@ public class PairingCodeService {
                     null,
                     pairingLink,
                     null,
-                    "paired token not found and fixed pairing code is not configured",
+                    candidateTokens.isEmpty()
+                            ? "paired token not found and fixed pairing code is not configured"
+                            : "paired token candidates found but all were invalid",
                     fetchedAt
             );
         }
@@ -110,12 +132,14 @@ public class PairingCodeService {
                 fixedPairingCode,
                 pairingLink,
                 requestExample,
-                "paired token not found; fallback to manual pairing request",
+                candidateTokens.isEmpty()
+                        ? "paired token not found; fallback to manual pairing request"
+                        : "paired token candidates were invalid; fallback to manual pairing request",
                 fetchedAt
         );
     }
 
-    private String readFirstPairedToken(UUID instanceId) {
+    private List<String> readPairedTokens(UUID instanceId) {
         String containerName = containerPrefix + "-" + instanceId;
         CommandResult result = runCommand(
                 dockerCommand,
@@ -126,29 +150,87 @@ public class PairingCodeService {
                 gatewayConfigPath
         );
         if (result.exitCode != 0 || !StringUtils.hasText(result.output)) {
-            return null;
+            return List.of();
         }
-        return extractFirstPairedToken(result.output);
+        return extractPairedTokens(result.output);
     }
 
-    private String extractFirstPairedToken(String configText) {
+    private List<String> extractPairedTokens(String configText) {
         Matcher tokenArrayMatcher = PAIRED_TOKENS_PATTERN.matcher(configText);
         if (!tokenArrayMatcher.find()) {
-            return null;
+            return List.of();
         }
+
         String tokenArrayBody = tokenArrayMatcher.group(1);
-        Matcher tokenMatcher = QUOTED_STRING_PATTERN.matcher(tokenArrayBody);
-        if (!tokenMatcher.find()) {
-            return null;
+        Set<String> tokens = new LinkedHashSet<>();
+
+        Matcher namedTokenMatcher = TOKEN_FIELD_PATTERN.matcher(tokenArrayBody);
+        while (namedTokenMatcher.find()) {
+            String token = unescapeTomlString(namedTokenMatcher.group(1));
+            if (StringUtils.hasText(token)) {
+                tokens.add(token.trim());
+            }
         }
-        String raw = tokenMatcher.group(1);
-        if (!StringUtils.hasText(raw)) {
-            return null;
+
+        if (tokens.isEmpty()) {
+            Matcher tokenMatcher = QUOTED_STRING_PATTERN.matcher(tokenArrayBody);
+            while (tokenMatcher.find()) {
+                String token = unescapeTomlString(tokenMatcher.group(1));
+                if (StringUtils.hasText(token)) {
+                    tokens.add(token.trim());
+                }
+            }
         }
-        return raw
+
+        return new ArrayList<>(tokens);
+    }
+
+    private String unescapeTomlString(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value
                 .replace("\\\"", "\"")
-                .replace("\\\\", "\\")
-                .trim();
+                .replace("\\\\", "\\");
+    }
+
+    private String findUsableToken(List<String> candidateTokens, String gatewayUrl) {
+        if (candidateTokens == null || candidateTokens.isEmpty()) {
+            return null;
+        }
+        for (String token : candidateTokens) {
+            if (!StringUtils.hasText(token)) {
+                continue;
+            }
+            if (isTokenUsable(token.trim(), gatewayUrl)) {
+                return token.trim();
+            }
+        }
+        return null;
+    }
+
+    private boolean isTokenUsable(String token, String gatewayUrl) {
+        try {
+            URI statusUri = URI.create(buildApiStatusEndpoint(gatewayUrl));
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(statusUri)
+                    .timeout(authProbeTimeout)
+                    .header("Authorization", "Bearer " + token)
+                    .GET()
+                    .build();
+            HttpResponse<Void> response = authProbeClient.send(request, HttpResponse.BodyHandlers.discarding());
+            return response.statusCode() >= 200 && response.statusCode() < 300;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private String buildApiStatusEndpoint(String gatewayUrl) {
+        String normalized = gatewayUrl.trim();
+        if (normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        return normalized + "/api/status";
     }
 
     private CommandResult runCommand(String... command) {
