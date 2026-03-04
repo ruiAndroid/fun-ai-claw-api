@@ -27,13 +27,15 @@ public class PairingCodeService {
 
     private static final Pattern SIX_DIGIT_PATTERN = Pattern.compile("(?<!\\d)(\\d{6})(?!\\d)");
     private static final Pattern NUMERIC_CODE_PATTERN = Pattern.compile("(?<!\\d)(\\d{6,8})(?!\\d)");
+    private static final Pattern LOG_TIMESTAMP_PREFIX_PATTERN = Pattern.compile("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}");
     private static final Pattern HINTED_CODE_PATTERN = Pattern.compile(
-            "(?i)(?:pair(?:ing)?(?:\\s*(?:code|token|pin))?|verification\\s*code|otp|code)\\D{0,20}([A-Za-z0-9\\-]{4,24})"
+            "(?i)(?:pair(?:ing)?(?:\\s*(?:code|token|pin))?|verification\\s*code|otp|code)\\D{0,20}([A-Za-z0-9]{4,24})"
     );
     private static final Pattern CODE_QUERY_PATTERN = Pattern.compile(
-            "(?i)(?:[?&](?:pair(?:ing)?[_-]?code|verification[_-]?code|otp|code)=)([A-Za-z0-9\\-]{4,24})"
+            "(?i)(?:[?&](?:pair(?:ing)?[_-]?code|verification[_-]?code|otp|code)=)([A-Za-z0-9]{4,24})"
     );
-    private static final Pattern ALPHANUMERIC_TOKEN_PATTERN = Pattern.compile("(?<![A-Za-z0-9])([A-Za-z0-9\\-]{4,24})(?![A-Za-z0-9])");
+    private static final Pattern ANSI_ESCAPE_PATTERN = Pattern.compile("\\u001B\\[[;\\d]*[ -/]*[@-~]");
+    private static final Pattern ANSI_COLOR_MARKER_PATTERN = Pattern.compile("\\[[;\\d]*m");
     private static final Pattern DATE_LIKE_PATTERN = Pattern.compile("^\\d{4}-\\d{2}-\\d{2}$");
     private static final Set<String> HINT_KEYWORDS = Set.of(
             "pair",
@@ -42,10 +44,27 @@ public class PairingCodeService {
             "otp",
             "verification"
     );
+    private static final Set<String> PAIRING_ACTIVE_MARKERS = Set.of(
+            "pairing: active",
+            "pairing active",
+            "bearer token required"
+    );
+    private static final Set<String> NEGATIVE_HINT_KEYWORDS = Set.of(
+            "invalid code",
+            "pairing attempt",
+            "pairing: active",
+            "pairing active",
+            "bearer token required",
+            "paired successfully"
+    );
     private static final Set<String> CANDIDATE_STOP_WORDS = Set.of(
             "pair",
             "pairing",
             "code",
+            "active",
+            "inactive",
+            "bearer",
+            "required",
             "token",
             "pin",
             "otp",
@@ -96,6 +115,15 @@ public class PairingCodeService {
             LogReadResult logReadResult = readContainerLogs(containerName);
             lastLogReadResult = logReadResult;
             if (logReadResult.succeeded()) {
+                if (isPairingAlreadyActive(logReadResult.output())) {
+                    return new PairingCodeResponse(
+                            instance.id(),
+                            null,
+                            null,
+                            "pairing is already active for this instance; no one-time code is available",
+                            Instant.now()
+                    );
+                }
                 PairingCodeMatch match = extractPairingCode(logReadResult.output());
                 if (match != null) {
                     return new PairingCodeResponse(
@@ -188,7 +216,11 @@ public class PairingCodeService {
         if (!StringUtils.hasText(logs)) {
             return null;
         }
-        String[] lines = logs.split("\\R");
+        String[] rawLines = logs.split("\\R");
+        String[] lines = new String[rawLines.length];
+        for (int index = 0; index < rawLines.length; index++) {
+            lines[index] = normalizeLogLine(rawLines[index]);
+        }
         PairingCodeMatch matchWithHint = findMatchWithHint(lines);
         if (matchWithHint != null) {
             return matchWithHint;
@@ -208,6 +240,9 @@ public class PairingCodeService {
             }
             String normalized = line.toLowerCase(Locale.ROOT);
             if (!containsHintKeyword(normalized)) {
+                continue;
+            }
+            if (containsNegativeHintKeyword(normalized)) {
                 continue;
             }
 
@@ -243,14 +278,6 @@ public class PairingCodeService {
                 return candidate;
             }
         }
-
-        Matcher tokenMatcher = ALPHANUMERIC_TOKEN_PATTERN.matcher(line);
-        while (tokenMatcher.find()) {
-            String candidate = sanitizeCandidate(tokenMatcher.group(1));
-            if (isLikelyPairingCode(candidate)) {
-                return candidate;
-            }
-        }
         return null;
     }
 
@@ -263,10 +290,22 @@ public class PairingCodeService {
         return false;
     }
 
+    private boolean containsNegativeHintKeyword(String normalizedLine) {
+        for (String keyword : NEGATIVE_HINT_KEYWORDS) {
+            if (normalizedLine.contains(keyword)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private PairingCodeMatch findAnyNumericMatch(String[] lines) {
         for (int index = lines.length - 1; index >= 0; index--) {
             String line = lines[index];
             if (!StringUtils.hasText(line)) {
+                continue;
+            }
+            if (LOG_TIMESTAMP_PREFIX_PATTERN.matcher(line).find()) {
                 continue;
             }
             Matcher matcher = NUMERIC_CODE_PATTERN.matcher(line);
@@ -286,12 +325,34 @@ public class PairingCodeService {
             if (!StringUtils.hasText(line)) {
                 continue;
             }
+            if (LOG_TIMESTAMP_PREFIX_PATTERN.matcher(line).find()) {
+                continue;
+            }
             Matcher matcher = SIX_DIGIT_PATTERN.matcher(line);
             if (matcher.find()) {
                 return new PairingCodeMatch(matcher.group(1), line.trim());
             }
         }
         return null;
+    }
+
+    private boolean isPairingAlreadyActive(String logs) {
+        if (!StringUtils.hasText(logs)) {
+            return false;
+        }
+        String[] lines = logs.split("\\R");
+        for (int index = lines.length - 1; index >= 0; index--) {
+            String normalized = normalizeLogLine(lines[index]).toLowerCase(Locale.ROOT);
+            if (!StringUtils.hasText(normalized)) {
+                continue;
+            }
+            for (String marker : PAIRING_ACTIVE_MARKERS) {
+                if (normalized.contains(marker)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private boolean isLikelyPairingCode(String rawCandidate) {
@@ -321,9 +382,7 @@ public class PairingCodeService {
         boolean hasDigit = normalized.chars().anyMatch(Character::isDigit);
         boolean hasLetter = normalized.chars().anyMatch(Character::isLetter);
         if (!hasDigit) {
-            return hasLetter
-                    && normalized.length() >= 6
-                    && normalized.equals(normalized.toUpperCase(Locale.ROOT));
+            return false;
         }
         if (!hasLetter) {
             return normalized.length() >= 6 && normalized.length() <= 8;
@@ -338,6 +397,15 @@ public class PairingCodeService {
         return candidate.trim()
                 .replaceAll("^[^A-Za-z0-9]+", "")
                 .replaceAll("[^A-Za-z0-9]+$", "");
+    }
+
+    private String normalizeLogLine(String line) {
+        if (!StringUtils.hasText(line)) {
+            return "";
+        }
+        String cleaned = ANSI_ESCAPE_PATTERN.matcher(line).replaceAll("");
+        cleaned = ANSI_COLOR_MARKER_PATTERN.matcher(cleaned).replaceAll("");
+        return cleaned.trim();
     }
 
     private record PairingCodeMatch(String code, String sourceLine) {
