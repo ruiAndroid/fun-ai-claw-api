@@ -32,8 +32,10 @@ import java.util.Enumeration;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.StringJoiner;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @RestController
@@ -43,6 +45,8 @@ public class UiControllerProxyController {
     private static final Pattern CONFIG_PATH_PATTERN = Pattern.compile("(?i)\"config_path\"\\s*:\\s*\"[^\"]*\"");
     private static final Pattern CONFIG_PATH_CAMEL_PATTERN = Pattern.compile("(?i)\"configPath\"\\s*:\\s*\"[^\"]*\"");
     private static final Pattern STATUS_PAIRED_FALSE_PATTERN = Pattern.compile("(?i)\"paired\"\\s*:\\s*false");
+    private static final Pattern API_KEYS_PATTERN = Pattern.compile("(?is)\\bapi_keys\\s*=\\s*\\[(.*?)]");
+    private static final Pattern QUOTED_STRING_PATTERN = Pattern.compile("\"((?:\\\\.|[^\"\\\\])*)\"");
 
     private static final Set<String> SKIPPED_REQUEST_HEADERS = Set.of(
             "host",
@@ -165,7 +169,8 @@ public class UiControllerProxyController {
         }
 
         URI targetUri = buildTargetUri(instanceId, gatewayHostPort, request);
-        HttpRequest outboundRequest = buildOutboundRequest(request, requestBody, targetUri);
+        byte[] normalizedRequestBody = rewriteConfigSavePayloadIfNeeded(instanceId, request, requestBody, targetUri);
+        HttpRequest outboundRequest = buildOutboundRequest(request, normalizedRequestBody, targetUri);
         HttpResponse<byte[]> upstreamResponse = send(outboundRequest);
         if (isConfigEndpoint(targetUri.getPath()) && upstreamResponse.statusCode() >= 500) {
             String errorBody = upstreamResponse.body() == null
@@ -180,7 +185,7 @@ public class UiControllerProxyController {
             URI retryUri = ensureConfigPathQueryPresent(targetUri);
             if (!retryUri.equals(targetUri)) {
                 log.warn("ui proxy retry /api/config with forced config_path: {}", retryUri);
-                HttpRequest retryRequest = buildOutboundRequest(request, requestBody, retryUri);
+                HttpRequest retryRequest = buildOutboundRequest(request, normalizedRequestBody, retryUri);
                 upstreamResponse = send(retryRequest);
                 if (upstreamResponse.statusCode() >= 500) {
                     String retryErrorBody = upstreamResponse.body() == null
@@ -193,9 +198,9 @@ public class UiControllerProxyController {
                 }
             }
         }
-        if (shouldApplyDirectConfigSaveFallback(request, targetUri, requestBody, upstreamResponse)) {
+        if (shouldApplyDirectConfigSaveFallback(request, targetUri, normalizedRequestBody, upstreamResponse)) {
             log.warn("ui proxy trigger config-save fallback for instanceId={}, uri={}", instanceId, targetUri);
-            if (saveConfigFileToContainer(instanceId, requestBody)) {
+            if (saveConfigFileToContainer(instanceId, normalizedRequestBody)) {
                 HttpHeaders fallbackHeaders = new HttpHeaders();
                 fallbackHeaders.set(HttpHeaders.CONTENT_TYPE, "application/json");
                 byte[] body = "{\"saved\":true,\"source\":\"ui-proxy-fallback\"}".getBytes(StandardCharsets.UTF_8);
@@ -466,10 +471,9 @@ public class UiControllerProxyController {
                                              byte[] requestBody,
                                              URI targetUri,
                                              String forcedContentType) {
-        byte[] normalizedBody = rewriteConfigSavePayloadIfNeeded(inboundRequest, requestBody, targetUri);
-        HttpRequest.BodyPublisher bodyPublisher = (normalizedBody == null || normalizedBody.length == 0)
+        HttpRequest.BodyPublisher bodyPublisher = (requestBody == null || requestBody.length == 0)
                 ? HttpRequest.BodyPublishers.noBody()
-                : HttpRequest.BodyPublishers.ofByteArray(normalizedBody);
+                : HttpRequest.BodyPublishers.ofByteArray(requestBody);
 
         HttpRequest.Builder outboundBuilder = HttpRequest.newBuilder()
                 .uri(targetUri)
@@ -494,10 +498,10 @@ public class UiControllerProxyController {
         outboundBuilder.setHeader("X-ConfigPath", ZEROCLAW_DEFAULT_CONFIG_PATH);
     }
 
-    private byte[] rewriteConfigSavePayloadIfNeeded(HttpServletRequest inboundRequest, byte[] requestBody, URI targetUri) {
-        if (!forceConfigPathOnSave) {
-            return requestBody;
-        }
+    private byte[] rewriteConfigSavePayloadIfNeeded(UUID instanceId,
+                                                    HttpServletRequest inboundRequest,
+                                                    byte[] requestBody,
+                                                    URI targetUri) {
         if (requestBody == null || requestBody.length == 0 || targetUri == null) {
             return requestBody;
         }
@@ -508,12 +512,18 @@ public class UiControllerProxyController {
         if (!"/api/config".equals(targetUri.getPath())) {
             return requestBody;
         }
-        String contentType = inboundRequest.getContentType();
-        if (!StringUtils.hasText(contentType) || !contentType.toLowerCase(Locale.ROOT).contains("application/json")) {
-            return requestBody;
+
+        byte[] normalizedBody = restoreMaskedApiKeysIfNeeded(instanceId, inboundRequest, requestBody);
+        if (!forceConfigPathOnSave) {
+            return normalizedBody;
         }
 
-        String raw = new String(requestBody, StandardCharsets.UTF_8);
+        String contentType = inboundRequest.getContentType();
+        if (!StringUtils.hasText(contentType) || !contentType.toLowerCase(Locale.ROOT).contains("application/json")) {
+            return normalizedBody;
+        }
+
+        String raw = new String(normalizedBody, StandardCharsets.UTF_8);
         String rewritten = CONFIG_PATH_PATTERN.matcher(raw)
                 .replaceAll("\"config_path\":\"" + ZEROCLAW_DEFAULT_CONFIG_PATH + "\"");
         rewritten = CONFIG_PATH_CAMEL_PATTERN.matcher(rewritten)
@@ -532,9 +542,123 @@ public class UiControllerProxyController {
         }
 
         if (rewritten.equals(raw)) {
-            return requestBody;
+            return normalizedBody;
         }
         return rewritten.getBytes(StandardCharsets.UTF_8);
+    }
+
+    private byte[] restoreMaskedApiKeysIfNeeded(UUID instanceId,
+                                                HttpServletRequest inboundRequest,
+                                                byte[] requestBody) {
+        String contentType = inboundRequest.getContentType();
+        if (!StringUtils.hasText(contentType) || !contentType.toLowerCase(Locale.ROOT).contains("toml")) {
+            return requestBody;
+        }
+        String incoming = new String(requestBody, StandardCharsets.UTF_8);
+        if (!incoming.contains("***MASKED***")) {
+            return requestBody;
+        }
+
+        List<String> incomingKeys = extractApiKeys(incoming);
+        if (incomingKeys.isEmpty()) {
+            return requestBody;
+        }
+        boolean hasMasked = incomingKeys.stream().anyMatch("***MASKED***"::equals);
+        if (!hasMasked) {
+            return requestBody;
+        }
+
+        String currentConfig = readCurrentConfigFromContainer(instanceId);
+        if (!StringUtils.hasText(currentConfig)) {
+            return requestBody;
+        }
+        List<String> currentKeys = extractApiKeys(currentConfig);
+        if (currentKeys.isEmpty()) {
+            return requestBody;
+        }
+
+        List<String> merged = new ArrayList<>(incomingKeys.size());
+        for (int i = 0; i < incomingKeys.size(); i++) {
+            String key = incomingKeys.get(i);
+            if ("***MASKED***".equals(key) && i < currentKeys.size() && StringUtils.hasText(currentKeys.get(i))) {
+                merged.add(currentKeys.get(i));
+            } else {
+                merged.add(key);
+            }
+        }
+
+        String rewritten = replaceApiKeys(incoming, merged);
+        if (!rewritten.equals(incoming)) {
+            log.info("ui proxy restored masked api_keys placeholders from existing config for instanceId={}", instanceId);
+            return rewritten.getBytes(StandardCharsets.UTF_8);
+        }
+        return requestBody;
+    }
+
+    private String readCurrentConfigFromContainer(UUID instanceId) {
+        if (!StringUtils.hasText(containerPrefix) || !StringUtils.hasText(configSaveFallbackPath)) {
+            return null;
+        }
+        String containerName = containerPrefix.trim() + "-" + instanceId;
+        String configPath = configSaveFallbackPath.trim();
+        CommandResult readResult = runProcess(List.of(
+                dockerCommand,
+                "exec",
+                containerName,
+                "/bin/busybox",
+                "cat",
+                configPath
+        ), null);
+        if (readResult.exitCode != 0 || !StringUtils.hasText(readResult.output)) {
+            return null;
+        }
+        return readResult.output;
+    }
+
+    private List<String> extractApiKeys(String toml) {
+        if (!StringUtils.hasText(toml)) {
+            return List.of();
+        }
+        Matcher matcher = API_KEYS_PATTERN.matcher(toml);
+        if (!matcher.find()) {
+            return List.of();
+        }
+        String arrayBody = matcher.group(1);
+        Matcher quotedMatcher = QUOTED_STRING_PATTERN.matcher(arrayBody);
+        List<String> keys = new ArrayList<>();
+        while (quotedMatcher.find()) {
+            keys.add(unescapeTomlString(quotedMatcher.group(1)));
+        }
+        return keys;
+    }
+
+    private String replaceApiKeys(String toml, List<String> keys) {
+        Matcher matcher = API_KEYS_PATTERN.matcher(toml);
+        if (!matcher.find()) {
+            return toml;
+        }
+        StringJoiner joiner = new StringJoiner(", ", "api_keys = [", "]");
+        for (String key : keys) {
+            String safe = key == null ? "" : key;
+            joiner.add("\"" + escapeTomlString(safe) + "\"");
+        }
+        String replacement = joiner.toString();
+        return toml.substring(0, matcher.start()) + replacement + toml.substring(matcher.end());
+    }
+
+    private String unescapeTomlString(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value
+                .replace("\\\"", "\"")
+                .replace("\\\\", "\\");
+    }
+
+    private String escapeTomlString(String value) {
+        return value
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"");
     }
 
     private void copyRequestHeaders(HttpServletRequest inboundRequest, HttpRequest.Builder outboundBuilder) {
