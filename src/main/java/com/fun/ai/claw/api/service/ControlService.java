@@ -11,6 +11,8 @@ import com.fun.ai.claw.api.model.InstanceDesiredState;
 import com.fun.ai.claw.api.model.InstanceRuntime;
 import com.fun.ai.claw.api.model.InstanceStatus;
 import com.fun.ai.claw.api.repository.InstanceRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -28,6 +30,7 @@ import java.util.UUID;
 
 @Service
 public class ControlService {
+    private static final Logger log = LoggerFactory.getLogger(ControlService.class);
 
     private final InstanceRepository instanceRepository;
     private final ImageCatalogProperties imageCatalogProperties;
@@ -125,6 +128,9 @@ public class ControlService {
             );
             PlaneClient.PlaneTaskExecutionRecord execution = executionResult.execution();
             if (!execution.succeeded()) {
+                log.error("create instance failed by plane, instanceId={}, action=START, message={}",
+                        instance.id(),
+                        execution.message());
                 throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "plane execution failed: " + execution.message());
             }
             Instant updatedAt = Instant.now();
@@ -187,6 +193,10 @@ public class ControlService {
                 now
         );
         if (!execution.succeeded()) {
+            log.error("instance action failed by plane, instanceId={}, action={}, message={}",
+                    instance.id(),
+                    request.action(),
+                    execution.message());
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "plane execution failed: " + execution.message());
         }
         return new AcceptedActionResponse(actionTaskId, now);
