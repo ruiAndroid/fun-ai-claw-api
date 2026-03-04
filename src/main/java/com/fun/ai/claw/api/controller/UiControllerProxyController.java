@@ -990,11 +990,37 @@ public class UiControllerProxyController {
                     if (existingToken === 'public-access') {
                       window.localStorage.removeItem('zeroclaw_token');
                     }
+                    // Some UI builds may store token under different keys; remove placeholder value globally.
+                    for (var storageIndex = 0; storageIndex < window.localStorage.length; storageIndex++) {
+                      var storageKey = window.localStorage.key(storageIndex);
+                      if (!storageKey) { continue; }
+                      var storageValue = window.localStorage.getItem(storageKey);
+                      if (storageValue === 'public-access') {
+                        window.localStorage.removeItem(storageKey);
+                        storageIndex--;
+                      }
+                    }
                   } catch (e) {
                     // ignore storage errors and continue normal flow
                   }
                   function isHttpUrl(url) { return /^https?:\\/\\//i.test(url); }
                   function isWsUrl(url) { return /^wss?:\\/\\//i.test(url); }
+                  function sanitizeTokenQuery(urlValue) {
+                    if (typeof urlValue !== 'string' || !urlValue) { return urlValue; }
+                    try {
+                      var parsed = new URL(urlValue, window.location.origin);
+                      var token = parsed.searchParams.get('token');
+                      if (token !== 'public-access') { return urlValue; }
+                      parsed.searchParams.delete('token');
+                      var isRelative = !isHttpUrl(urlValue) && !isWsUrl(urlValue);
+                      if (isRelative) {
+                        return parsed.pathname + (parsed.search ? parsed.search : '') + (parsed.hash ? parsed.hash : '');
+                      }
+                      return parsed.toString();
+                    } catch (e) {
+                      return urlValue;
+                    }
+                  }
                   function prefixPath(path) {
                     if (typeof path !== 'string' || !path) { return path; }
                     if (path.indexOf(base + '/') === 0 || path === base) { return path; }
@@ -1017,13 +1043,15 @@ public class UiControllerProxyController {
                         var sameHost = parsed.host === window.location.host;
                         if (!sameOrigin && !(isWsUrl(url) && sameHost) && !(isHttpUrl(url) && sameHost)) { return url; }
                         var nextPath = prefixPath(parsed.pathname);
-                        if (nextPath === parsed.pathname) { return url; }
-                        return parsed.origin + nextPath + parsed.search + parsed.hash;
+                        if (nextPath !== parsed.pathname) {
+                          parsed.pathname = nextPath;
+                        }
+                        return sanitizeTokenQuery(parsed.toString());
                       } catch (e) {
-                        return url;
+                        return sanitizeTokenQuery(url);
                       }
                     }
-                    return prefixPath(url);
+                    return sanitizeTokenQuery(prefixPath(url));
                   }
                   var originalFetch = window.fetch;
                   if (typeof originalFetch === 'function') {
