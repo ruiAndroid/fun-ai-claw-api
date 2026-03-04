@@ -33,6 +33,8 @@ app:
     upstream-scheme: ${UI_CONTROLLER_UPSTREAM_SCHEME:http}
     upstream-host: ${UI_CONTROLLER_UPSTREAM_HOST:127.0.0.1}
     request-timeout-seconds: ${UI_CONTROLLER_REQUEST_TIMEOUT_SECONDS:60}
+    upstream-retry-attempts: ${UI_CONTROLLER_UPSTREAM_RETRY_ATTEMPTS:8}
+    upstream-retry-delay-millis: ${UI_CONTROLLER_UPSTREAM_RETRY_DELAY_MILLIS:300}
   pairing-code:
     fixed-code: ""
     fixed-link-path: /

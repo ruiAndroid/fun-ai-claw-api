@@ -85,6 +85,8 @@ public class UiControllerProxyController {
     private final Duration commandTimeout;
     private final String autoAuthQueryParam;
     private final String authTokenQueryParam;
+    private final int upstreamRetryAttempts;
+    private final long upstreamRetryDelayMillis;
 
     public UiControllerProxyController(InstanceRepository instanceRepository,
                                        @Value("${app.ui-controller.upstream-scheme:http}") String upstreamScheme,
@@ -96,6 +98,8 @@ public class UiControllerProxyController {
                                        @Value("${app.ui-controller.config-save-fallback-enabled:true}") boolean configSaveFallbackEnabled,
                                        @Value("${app.ui-controller.config-save-fallback-path:/data/zeroclaw/config.toml}") String configSaveFallbackPath,
                                        @Value("${app.ui-controller.command-timeout-seconds:15}") long commandTimeoutSeconds,
+                                       @Value("${app.ui-controller.upstream-retry-attempts:8}") int upstreamRetryAttempts,
+                                       @Value("${app.ui-controller.upstream-retry-delay-millis:300}") long upstreamRetryDelayMillis,
                                        @Value("${app.pairing-code.auto-auth-query-param:autoAuth}") String autoAuthQueryParam,
                                        @Value("${app.pairing-code.auth-token-query-param:authToken}") String authTokenQueryParam) {
         this.instanceRepository = instanceRepository;
@@ -110,13 +114,20 @@ public class UiControllerProxyController {
         this.configSaveFallbackPath = configSaveFallbackPath;
         long commandSeconds = commandTimeoutSeconds > 0 ? commandTimeoutSeconds : 15;
         this.commandTimeout = Duration.ofSeconds(commandSeconds);
+        this.upstreamRetryAttempts = upstreamRetryAttempts > 0 ? upstreamRetryAttempts : 1;
+        this.upstreamRetryDelayMillis = Math.max(upstreamRetryDelayMillis, 0L);
         this.autoAuthQueryParam = StringUtils.hasText(autoAuthQueryParam) ? autoAuthQueryParam.trim() : "autoAuth";
         this.authTokenQueryParam = StringUtils.hasText(authTokenQueryParam) ? authTokenQueryParam.trim() : "authToken";
         this.httpClient = HttpClient.newBuilder()
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .build();
-        log.info("ui proxy config-save fallback enabled={}, dockerCommand={}, containerPrefix={}, fallbackPath={}",
-                this.configSaveFallbackEnabled, this.dockerCommand, this.containerPrefix, this.configSaveFallbackPath);
+        log.info("ui proxy config-save fallback enabled={}, dockerCommand={}, containerPrefix={}, fallbackPath={}, upstreamRetryAttempts={}, upstreamRetryDelayMillis={}",
+                this.configSaveFallbackEnabled,
+                this.dockerCommand,
+                this.containerPrefix,
+                this.configSaveFallbackPath,
+                this.upstreamRetryAttempts,
+                this.upstreamRetryDelayMillis);
     }
 
     @RequestMapping(
@@ -555,14 +566,35 @@ public class UiControllerProxyController {
     }
 
     private HttpResponse<byte[]> send(HttpRequest outboundRequest) {
-        try {
-            return httpClient.send(outboundRequest, HttpResponse.BodyHandlers.ofByteArray());
-        } catch (IOException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "failed to proxy ui request: " + ex.getMessage());
-        } catch (InterruptedException ex) {
-            Thread.currentThread().interrupt();
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "ui proxy request interrupted");
+        IOException lastIoException = null;
+        for (int attempt = 1; attempt <= upstreamRetryAttempts; attempt++) {
+            try {
+                return httpClient.send(outboundRequest, HttpResponse.BodyHandlers.ofByteArray());
+            } catch (IOException ex) {
+                lastIoException = ex;
+                if (attempt >= upstreamRetryAttempts) {
+                    break;
+                }
+                log.warn("ui proxy upstream request retry {}/{} uri={} reason={}",
+                        attempt,
+                        upstreamRetryAttempts,
+                        outboundRequest.uri(),
+                        ex.getMessage());
+                if (upstreamRetryDelayMillis > 0) {
+                    try {
+                        Thread.sleep(upstreamRetryDelayMillis);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "ui proxy request interrupted");
+                    }
+                }
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "ui proxy request interrupted");
+            }
         }
+        String message = lastIoException == null ? "unknown io error" : lastIoException.getMessage();
+        throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "failed to proxy ui request: " + message);
     }
 
     private ResponseEntity<byte[]> buildResponse(UUID instanceId, URI targetUri, HttpResponse<byte[]> upstreamResponse) {
