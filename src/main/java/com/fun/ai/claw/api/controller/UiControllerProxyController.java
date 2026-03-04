@@ -82,8 +82,8 @@ public class UiControllerProxyController {
     private final boolean configSaveFallbackEnabled;
     private final String configSaveFallbackPath;
     private final Duration commandTimeout;
-    private final String fixedPairingCode;
-    private final String autoPairQueryParam;
+    private final String autoAuthQueryParam;
+    private final String authTokenQueryParam;
 
     public UiControllerProxyController(InstanceRepository instanceRepository,
                                        @Value("${app.ui-controller.upstream-scheme:http}") String upstreamScheme,
@@ -95,8 +95,8 @@ public class UiControllerProxyController {
                                        @Value("${app.ui-controller.config-save-fallback-enabled:true}") boolean configSaveFallbackEnabled,
                                        @Value("${app.ui-controller.config-save-fallback-path:/data/zeroclaw/config.toml}") String configSaveFallbackPath,
                                        @Value("${app.ui-controller.command-timeout-seconds:15}") long commandTimeoutSeconds,
-                                       @Value("${app.pairing-code.fixed-code:}") String fixedPairingCode,
-                                       @Value("${app.pairing-code.auto-pair-query-param:autoPair}") String autoPairQueryParam) {
+                                       @Value("${app.pairing-code.auto-auth-query-param:autoAuth}") String autoAuthQueryParam,
+                                       @Value("${app.pairing-code.auth-token-query-param:authToken}") String authTokenQueryParam) {
         this.instanceRepository = instanceRepository;
         this.upstreamScheme = normalizeScheme(upstreamScheme);
         this.upstreamHost = requireHost(upstreamHost);
@@ -109,8 +109,8 @@ public class UiControllerProxyController {
         this.configSaveFallbackPath = configSaveFallbackPath;
         long commandSeconds = commandTimeoutSeconds > 0 ? commandTimeoutSeconds : 15;
         this.commandTimeout = Duration.ofSeconds(commandSeconds);
-        this.fixedPairingCode = fixedPairingCode == null ? "" : fixedPairingCode.trim();
-        this.autoPairQueryParam = StringUtils.hasText(autoPairQueryParam) ? autoPairQueryParam.trim() : "autoPair";
+        this.autoAuthQueryParam = StringUtils.hasText(autoAuthQueryParam) ? autoAuthQueryParam.trim() : "autoAuth";
+        this.authTokenQueryParam = StringUtils.hasText(authTokenQueryParam) ? authTokenQueryParam.trim() : "authToken";
         this.httpClient = HttpClient.newBuilder()
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .build();
@@ -622,7 +622,7 @@ public class UiControllerProxyController {
                 .replace("'/pair?", "'" + uiBase + "/pair?")
                 .replace("'/pair/", "'" + uiBase + "/pair/");
         if (htmlContent) {
-            rewritten = injectUiUrlShim(rewritten, uiBase, fixedPairingCode, autoPairQueryParam);
+            rewritten = injectUiUrlShim(rewritten, uiBase, autoAuthQueryParam, authTokenQueryParam);
         }
 
         if (rewritten.equals(raw)) {
@@ -673,26 +673,55 @@ public class UiControllerProxyController {
         return host.trim();
     }
 
-    private String injectUiUrlShim(String html, String uiBase, String fixedCode, String autoPairParam) {
+    private String injectUiUrlShim(String html, String uiBase, String autoAuthParam, String authTokenParam) {
         if (!StringUtils.hasText(html) || html.contains("data-fun-claw-ui-shim")) {
             return html;
         }
         String escapedBase = uiBase
                 .replace("\\", "\\\\")
                 .replace("'", "\\'");
-        String escapedFixedCode = (fixedCode == null ? "" : fixedCode)
+        String escapedAutoAuthParam = (autoAuthParam == null ? "autoAuth" : autoAuthParam)
                 .replace("\\", "\\\\")
                 .replace("'", "\\'");
-        String escapedAutoPairParam = (autoPairParam == null ? "autoPair" : autoPairParam)
+        String escapedAuthTokenParam = (authTokenParam == null ? "authToken" : authTokenParam)
                 .replace("\\", "\\\\")
                 .replace("'", "\\'");
         String shim = """
                 <script data-fun-claw-ui-shim>
                 (function () {
                   var base = '%s';
-                  var autoPairCode = '%s';
-                  var autoPairParam = '%s';
+                  var autoAuthParam = '%s';
+                  var authTokenParam = '%s';
                   var doc = document;
+                  function isTruthy(value) {
+                    if (value === null || typeof value === 'undefined') { return false; }
+                    var normalized = String(value).toLowerCase();
+                    return normalized === '' || normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+                  }
+                  function tryApplyAutoAuthToken() {
+                    if (!autoAuthParam || !authTokenParam) { return false; }
+                    var params;
+                    try {
+                      params = new URLSearchParams(window.location.search);
+                    } catch (e) {
+                      return false;
+                    }
+                    if (!isTruthy(params.get(autoAuthParam))) { return false; }
+                    var token = params.get(authTokenParam);
+                    if (!token) { return false; }
+                    try {
+                      window.localStorage.setItem('zeroclaw_token', token);
+                    } catch (e) {
+                      return false;
+                    }
+                    params.delete(autoAuthParam);
+                    params.delete(authTokenParam);
+                    var query = params.toString();
+                    var nextUrl = window.location.pathname + (query ? ('?' + query) : '') + (window.location.hash || '');
+                    window.location.replace(nextUrl);
+                    return true;
+                  }
+                  if (tryApplyAutoAuthToken()) { return; }
                   function isHttpUrl(url) { return /^https?:\\/\\//i.test(url); }
                   function isWsUrl(url) { return /^wss?:\\/\\//i.test(url); }
                   function prefixPath(path) {
@@ -790,58 +819,12 @@ public class UiControllerProxyController {
                     rewriteForms(root);
                     rewriteAnchors(root);
                   }
-                  function shouldAutoPair() {
-                    if (!autoPairCode || !autoPairParam) { return false; }
-                    try {
-                      var value = new URLSearchParams(window.location.search).get(autoPairParam);
-                      if (value === null) { return false; }
-                      var normalized = String(value).toLowerCase();
-                      return normalized === '' || normalized === '1' || normalized === 'true' || value === autoPairCode;
-                    } catch (e) {
-                      return false;
-                    }
-                  }
-                  function tryAutoPairOnce() {
-                    if (!shouldAutoPair()) { return true; }
-                    if (window.__funClawAutoPairSubmitted) { return true; }
-                    var input = doc.querySelector('input[maxlength="6"], input[placeholder*="code" i], input[type="text"]');
-                    if (!input) { return false; }
-                    var form = input.closest('form');
-                    if (!form) { return false; }
-                    input.focus();
-                    input.value = autoPairCode;
-                    input.dispatchEvent(new Event('input', { bubbles: true }));
-                    input.dispatchEvent(new Event('change', { bubbles: true }));
-                    window.__funClawAutoPairSubmitted = true;
-                    if (typeof form.requestSubmit === 'function') {
-                      form.requestSubmit();
-                    } else {
-                      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-                      var submitButton = form.querySelector('button[type="submit"], button');
-                      if (submitButton && typeof submitButton.click === 'function') {
-                        submitButton.click();
-                      }
-                    }
-                    return true;
-                  }
-                  function scheduleAutoPair() {
-                    if (!shouldAutoPair()) { return; }
-                    var attempts = 0;
-                    var timer = window.setInterval(function () {
-                      attempts += 1;
-                      if (tryAutoPairOnce() || attempts >= 30) {
-                        window.clearInterval(timer);
-                      }
-                    }, 250);
-                  }
                   if (doc.readyState === 'loading') {
                     doc.addEventListener('DOMContentLoaded', function () {
                       rewriteDomTargets(doc);
-                      scheduleAutoPair();
                     });
                   } else {
                     rewriteDomTargets(doc);
-                    scheduleAutoPair();
                   }
                   if (window.MutationObserver && doc.documentElement) {
                     var observer = new MutationObserver(function (mutations) {
@@ -851,7 +834,6 @@ public class UiControllerProxyController {
                           var node = addedNodes[j];
                           if (node && node.nodeType === 1) {
                             rewriteDomTargets(node);
-                            tryAutoPairOnce();
                           }
                         }
                       }
@@ -860,7 +842,7 @@ public class UiControllerProxyController {
                   }
                 })();
                 </script>
-                """.formatted(escapedBase, escapedFixedCode, escapedAutoPairParam);
+                """.formatted(escapedBase, escapedAutoAuthParam, escapedAuthTokenParam);
         String normalized = html;
         int headClose = normalized.toLowerCase(Locale.ROOT).indexOf("</head>");
         if (headClose >= 0) {
