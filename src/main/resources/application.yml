@@ -42,8 +42,9 @@ app:
     timeout-seconds: ${LLM_GATEWAY_TIMEOUT_SECONDS:120}
     prefer-incoming-authorization: ${LLM_GATEWAY_PREFER_INCOMING_AUTHORIZATION:true}
   pairing-code:
-    fixed-code: ${PAIRING_FIXED_CODE:809394}
-    fixed-link-path: ${PAIRING_FIXED_LINK_PATH:/pair}
+    fixed-code: 809393
+    fixed-link-path: /?autoPair=1
+    auto-pair-query-param: autoPair
   terminal:
     docker-command: ${TERMINAL_DOCKER_COMMAND:docker}
     container-prefix: ${TERMINAL_CONTAINER_PREFIX:funclaw}

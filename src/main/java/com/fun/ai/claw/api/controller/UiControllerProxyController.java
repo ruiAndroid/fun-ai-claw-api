@@ -82,6 +82,8 @@ public class UiControllerProxyController {
     private final boolean configSaveFallbackEnabled;
     private final String configSaveFallbackPath;
     private final Duration commandTimeout;
+    private final String fixedPairingCode;
+    private final String autoPairQueryParam;
 
     public UiControllerProxyController(InstanceRepository instanceRepository,
                                        @Value("${app.ui-controller.upstream-scheme:http}") String upstreamScheme,
@@ -92,7 +94,9 @@ public class UiControllerProxyController {
                                        @Value("${app.ui-controller.container-prefix:funclaw}") String containerPrefix,
                                        @Value("${app.ui-controller.config-save-fallback-enabled:true}") boolean configSaveFallbackEnabled,
                                        @Value("${app.ui-controller.config-save-fallback-path:/data/zeroclaw/config.toml}") String configSaveFallbackPath,
-                                       @Value("${app.ui-controller.command-timeout-seconds:15}") long commandTimeoutSeconds) {
+                                       @Value("${app.ui-controller.command-timeout-seconds:15}") long commandTimeoutSeconds,
+                                       @Value("${app.pairing-code.fixed-code:}") String fixedPairingCode,
+                                       @Value("${app.pairing-code.auto-pair-query-param:autoPair}") String autoPairQueryParam) {
         this.instanceRepository = instanceRepository;
         this.upstreamScheme = normalizeScheme(upstreamScheme);
         this.upstreamHost = requireHost(upstreamHost);
@@ -105,6 +109,8 @@ public class UiControllerProxyController {
         this.configSaveFallbackPath = configSaveFallbackPath;
         long commandSeconds = commandTimeoutSeconds > 0 ? commandTimeoutSeconds : 15;
         this.commandTimeout = Duration.ofSeconds(commandSeconds);
+        this.fixedPairingCode = fixedPairingCode == null ? "" : fixedPairingCode.trim();
+        this.autoPairQueryParam = StringUtils.hasText(autoPairQueryParam) ? autoPairQueryParam.trim() : "autoPair";
         this.httpClient = HttpClient.newBuilder()
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .build();
@@ -616,7 +622,7 @@ public class UiControllerProxyController {
                 .replace("'/pair?", "'" + uiBase + "/pair?")
                 .replace("'/pair/", "'" + uiBase + "/pair/");
         if (htmlContent) {
-            rewritten = injectUiUrlShim(rewritten, uiBase);
+            rewritten = injectUiUrlShim(rewritten, uiBase, fixedPairingCode, autoPairQueryParam);
         }
 
         if (rewritten.equals(raw)) {
@@ -667,17 +673,25 @@ public class UiControllerProxyController {
         return host.trim();
     }
 
-    private String injectUiUrlShim(String html, String uiBase) {
+    private String injectUiUrlShim(String html, String uiBase, String fixedCode, String autoPairParam) {
         if (!StringUtils.hasText(html) || html.contains("data-fun-claw-ui-shim")) {
             return html;
         }
         String escapedBase = uiBase
                 .replace("\\", "\\\\")
                 .replace("'", "\\'");
+        String escapedFixedCode = (fixedCode == null ? "" : fixedCode)
+                .replace("\\", "\\\\")
+                .replace("'", "\\'");
+        String escapedAutoPairParam = (autoPairParam == null ? "autoPair" : autoPairParam)
+                .replace("\\", "\\\\")
+                .replace("'", "\\'");
         String shim = """
                 <script data-fun-claw-ui-shim>
                 (function () {
                   var base = '%s';
+                  var autoPairCode = '%s';
+                  var autoPairParam = '%s';
                   var doc = document;
                   function isHttpUrl(url) { return /^https?:\\/\\//i.test(url); }
                   function isWsUrl(url) { return /^wss?:\\/\\//i.test(url); }
@@ -776,10 +790,58 @@ public class UiControllerProxyController {
                     rewriteForms(root);
                     rewriteAnchors(root);
                   }
+                  function shouldAutoPair() {
+                    if (!autoPairCode || !autoPairParam) { return false; }
+                    try {
+                      var value = new URLSearchParams(window.location.search).get(autoPairParam);
+                      if (value === null) { return false; }
+                      var normalized = String(value).toLowerCase();
+                      return normalized === '' || normalized === '1' || normalized === 'true' || value === autoPairCode;
+                    } catch (e) {
+                      return false;
+                    }
+                  }
+                  function tryAutoPairOnce() {
+                    if (!shouldAutoPair()) { return true; }
+                    if (window.__funClawAutoPairSubmitted) { return true; }
+                    var input = doc.querySelector('input[maxlength="6"], input[placeholder*="code" i], input[type="text"]');
+                    if (!input) { return false; }
+                    var form = input.closest('form');
+                    if (!form) { return false; }
+                    input.focus();
+                    input.value = autoPairCode;
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                    window.__funClawAutoPairSubmitted = true;
+                    if (typeof form.requestSubmit === 'function') {
+                      form.requestSubmit();
+                    } else {
+                      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+                      var submitButton = form.querySelector('button[type="submit"], button');
+                      if (submitButton && typeof submitButton.click === 'function') {
+                        submitButton.click();
+                      }
+                    }
+                    return true;
+                  }
+                  function scheduleAutoPair() {
+                    if (!shouldAutoPair()) { return; }
+                    var attempts = 0;
+                    var timer = window.setInterval(function () {
+                      attempts += 1;
+                      if (tryAutoPairOnce() || attempts >= 30) {
+                        window.clearInterval(timer);
+                      }
+                    }, 250);
+                  }
                   if (doc.readyState === 'loading') {
-                    doc.addEventListener('DOMContentLoaded', function () { rewriteDomTargets(doc); });
+                    doc.addEventListener('DOMContentLoaded', function () {
+                      rewriteDomTargets(doc);
+                      scheduleAutoPair();
+                    });
                   } else {
                     rewriteDomTargets(doc);
+                    scheduleAutoPair();
                   }
                   if (window.MutationObserver && doc.documentElement) {
                     var observer = new MutationObserver(function (mutations) {
@@ -789,6 +851,7 @@ public class UiControllerProxyController {
                           var node = addedNodes[j];
                           if (node && node.nodeType === 1) {
                             rewriteDomTargets(node);
+                            tryAutoPairOnce();
                           }
                         }
                       }
@@ -797,7 +860,7 @@ public class UiControllerProxyController {
                   }
                 })();
                 </script>
-                """.formatted(escapedBase);
+                """.formatted(escapedBase, escapedFixedCode, escapedAutoPairParam);
         String normalized = html;
         int headClose = normalized.toLowerCase(Locale.ROOT).indexOf("</head>");
         if (headClose >= 0) {

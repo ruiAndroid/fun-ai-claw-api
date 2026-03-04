@@ -21,8 +21,8 @@ public class PairingCodeService {
     private final String gatewayUrlTemplate;
 
     public PairingCodeService(InstanceRepository instanceRepository,
-                              @Value("${app.pairing-code.fixed-code:809394}") String fixedPairingCode,
-                              @Value("${app.pairing-code.fixed-link-path:/pair}") String fixedLinkPath,
+                              @Value("${app.pairing-code.fixed-code:809393}") String fixedPairingCode,
+                              @Value("${app.pairing-code.fixed-link-path:/?autoPair=1}") String fixedLinkPath,
                               @Value("${app.gateway.url-template:http://8.152.159.249:80/fun-claw/ui-controller/{instanceId}}") String gatewayUrlTemplate) {
         this.instanceRepository = instanceRepository;
         this.fixedPairingCode = fixedPairingCode == null ? "" : fixedPairingCode.trim();
@@ -59,21 +59,22 @@ public class PairingCodeService {
         }
 
         String pairingLink = buildPairingLink(gatewayUrl);
-        String requestExample = "POST " + pairingLink + " with header X-Pairing-Code: " + fixedPairingCode;
+        String pairEndpoint = buildPairEndpoint(gatewayUrl);
+        String requestExample = "POST " + pairEndpoint + " with header X-Pairing-Code: " + fixedPairingCode;
 
         return new PairingCodeResponse(
                 instance.id(),
                 fixedPairingCode,
                 pairingLink,
                 requestExample,
-                null,
+                "open pairing link in browser for auto-fill, or run request example manually",
                 fetchedAt
         );
     }
 
     private String normalizeFixedLinkPath(String path) {
         if (!StringUtils.hasText(path)) {
-            return "/pair";
+            return "/?autoPair=1";
         }
         String trimmed = path.trim();
         return trimmed.startsWith("/") ? trimmed : "/" + trimmed;
@@ -97,5 +98,16 @@ public class PairingCodeService {
             return trimmedGatewayUrl.substring(0, trimmedGatewayUrl.length() - 1) + fixedLinkPath;
         }
         return trimmedGatewayUrl + fixedLinkPath;
+    }
+
+    private String buildPairEndpoint(String gatewayUrl) {
+        String trimmedGatewayUrl = gatewayUrl.trim();
+        if (!StringUtils.hasText(trimmedGatewayUrl)) {
+            return "/pair";
+        }
+        if (trimmedGatewayUrl.endsWith("/")) {
+            return trimmedGatewayUrl.substring(0, trimmedGatewayUrl.length() - 1) + "/pair";
+        }
+        return trimmedGatewayUrl + "/pair";
     }
 }
