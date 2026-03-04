@@ -984,21 +984,12 @@ public class UiControllerProxyController {
                     return true;
                   }
                   if (tryApplyAutoAuthToken()) { return; }
-                  // Cleanup legacy placeholder token that can break ws/chat auth flow.
+                  // Keep a placeholder token so UI won't force pairing screen.
+                  // Real requests will strip token=public-access in rewriteUrlLike().
                   try {
                     var existingToken = window.localStorage.getItem('zeroclaw_token');
-                    if (existingToken === 'public-access') {
-                      window.localStorage.removeItem('zeroclaw_token');
-                    }
-                    // Some UI builds may store token under different keys; remove placeholder value globally.
-                    for (var storageIndex = 0; storageIndex < window.localStorage.length; storageIndex++) {
-                      var storageKey = window.localStorage.key(storageIndex);
-                      if (!storageKey) { continue; }
-                      var storageValue = window.localStorage.getItem(storageKey);
-                      if (storageValue === 'public-access') {
-                        window.localStorage.removeItem(storageKey);
-                        storageIndex--;
-                      }
+                    if (!existingToken) {
+                      window.localStorage.setItem('zeroclaw_token', 'public-access');
                     }
                   } catch (e) {
                     // ignore storage errors and continue normal flow
