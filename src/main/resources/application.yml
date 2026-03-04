@@ -45,6 +45,9 @@ app:
     container-prefix: ${TERMINAL_CONTAINER_PREFIX:funclaw}
     shell: ${TERMINAL_SHELL:/bin/busybox sh}
     process-shutdown-timeout-seconds: ${TERMINAL_PROCESS_SHUTDOWN_TIMEOUT_SECONDS:2}
+  mgc-novel-to-script:
+    confirm-ttl-seconds: ${MGC_NOVEL_TO_SCRIPT_CONFIRM_TTL_SECONDS:600}
+    webhook-timeout-seconds: ${MGC_NOVEL_TO_SCRIPT_WEBHOOK_TIMEOUT_SECONDS:90}
   images:
     allow-custom-image: false
     presets:

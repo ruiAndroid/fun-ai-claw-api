@@ -41,6 +41,20 @@ public class UiControllerWebSocketProxyHandler extends AbstractWebSocketHandler 
     private static final Pattern REFERER_INSTANCE_PATH = Pattern.compile(
             "^/(?:fun-claw/ui-controller|ui-controller)/([0-9a-fA-F\\-]{36})(?:/.*)?$"
     );
+    private static final Pattern FUNCTION_CALLS_BLOCK_PATTERN =
+            Pattern.compile("(?is)<function_calls>.*?</function_calls>");
+    private static final Pattern TOOL_CALL_BLOCK_PATTERN =
+            Pattern.compile("(?is)<tool_call(?:\\s[^>]*)?>.*?</tool_call>");
+    private static final Pattern FUNCTION_RESULT_BLOCK_PATTERN =
+            Pattern.compile("(?is)<function_result>\\s*(.*?)\\s*</function_result>");
+    private static final Pattern RESPONSE_JSON_FIELD_PATTERN =
+            Pattern.compile("(?is)\"response\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
+    private static final Pattern RESULT_JSON_FIELD_PATTERN =
+            Pattern.compile("(?is)\"result\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
+    private static final Pattern INVOKE_PARAMETER_BLOCK_PATTERN =
+            Pattern.compile("(?is)<parameter\\s+name=\"(?:result|response)\">\\s*(.*?)\\s*</parameter>");
+    private static final Pattern FUNCTION_LIKE_TAG_PATTERN =
+            Pattern.compile("(?is)</?(?:function_calls|function_result|tool_call|tool_result|invoke|parameter)(?:\\s[^>]*)?>");
     private static final Set<String> FORWARDED_HANDSHAKE_HEADERS = Set.of(
             "authorization",
             "cookie",
@@ -254,11 +268,109 @@ public class UiControllerWebSocketProxyHandler extends AbstractWebSocketHandler 
         }
         try {
             synchronized (clientSession) {
+                if (message instanceof TextMessage textMessage) {
+                    String sanitizedPayload = sanitizeToolProtocolMarkup(textMessage.getPayload());
+                    if (!sanitizedPayload.equals(textMessage.getPayload())) {
+                        clientSession.sendMessage(new TextMessage(sanitizedPayload, textMessage.isLast()));
+                        return;
+                    }
+                }
                 clientSession.sendMessage(message);
             }
         } catch (IOException ex) {
             closeAndCleanup(clientSessionId, CloseStatus.SERVER_ERROR);
         }
+    }
+
+    private String sanitizeToolProtocolMarkup(String payload) {
+        if (!StringUtils.hasText(payload)) {
+            return payload;
+        }
+        String lower = payload.toLowerCase(Locale.ROOT);
+        if (!lower.contains("<function_calls")
+                && !lower.contains("<function_result")
+                && !lower.contains("<tool_call")) {
+            return payload;
+        }
+
+        List<String> extractedResults = new java.util.ArrayList<>();
+        String withoutFunctionResults = stripFunctionResultBlocks(payload, extractedResults);
+        String cleaned = FUNCTION_CALLS_BLOCK_PATTERN.matcher(withoutFunctionResults).replaceAll("");
+        cleaned = TOOL_CALL_BLOCK_PATTERN.matcher(cleaned).replaceAll("");
+        cleaned = FUNCTION_LIKE_TAG_PATTERN.matcher(cleaned).replaceAll("");
+        cleaned = normalizeChatText(cleaned);
+
+        String joinedResults = normalizeChatText(String.join("\n\n", extractedResults));
+        if (StringUtils.hasText(joinedResults)) {
+            if (StringUtils.hasText(cleaned)) {
+                return normalizeChatText(cleaned + "\n\n" + joinedResults);
+            }
+            return joinedResults;
+        }
+        return cleaned;
+    }
+
+    private String stripFunctionResultBlocks(String text, List<String> extractedResults) {
+        Matcher matcher = FUNCTION_RESULT_BLOCK_PATTERN.matcher(text);
+        StringBuffer rewritten = new StringBuffer();
+        while (matcher.find()) {
+            String inner = matcher.group(1);
+            String extracted = extractReadableFunctionResult(inner);
+            if (StringUtils.hasText(extracted)) {
+                extractedResults.add(extracted);
+            }
+            matcher.appendReplacement(rewritten, "");
+        }
+        matcher.appendTail(rewritten);
+        return rewritten.toString();
+    }
+
+    private String extractReadableFunctionResult(String inner) {
+        if (!StringUtils.hasText(inner)) {
+            return "";
+        }
+        String raw = inner.trim();
+
+        Matcher responseMatcher = RESPONSE_JSON_FIELD_PATTERN.matcher(raw);
+        if (responseMatcher.find()) {
+            return normalizeChatText(unescapeJsonString(responseMatcher.group(1)));
+        }
+
+        Matcher resultMatcher = RESULT_JSON_FIELD_PATTERN.matcher(raw);
+        if (resultMatcher.find()) {
+            return normalizeChatText(unescapeJsonString(resultMatcher.group(1)));
+        }
+
+        Matcher parameterMatcher = INVOKE_PARAMETER_BLOCK_PATTERN.matcher(raw);
+        if (parameterMatcher.find()) {
+            return normalizeChatText(parameterMatcher.group(1));
+        }
+
+        return normalizeChatText(FUNCTION_LIKE_TAG_PATTERN.matcher(raw).replaceAll(""));
+    }
+
+    private String unescapeJsonString(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value
+                .replace("\\\\", "\\")
+                .replace("\\\"", "\"")
+                .replace("\\n", "\n")
+                .replace("\\r", "\r")
+                .replace("\\t", "\t");
+    }
+
+    private String normalizeChatText(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value
+                .replace("\r\n", "\n")
+                .replace('\r', '\n')
+                .replaceAll("[\\t ]+\\n", "\n")
+                .replaceAll("\\n{3,}", "\n\n")
+                .trim();
     }
 
     private void closeAndCleanup(String clientSessionId, CloseStatus status) {
