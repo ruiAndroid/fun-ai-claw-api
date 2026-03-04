@@ -36,6 +36,8 @@ app:
   pairing-code:
     log-tail-lines: 300
     command-timeout-seconds: 8
+    fetch-attempts: 4
+    fetch-retry-interval-millis: 1000
   terminal:
     docker-command: ${TERMINAL_DOCKER_COMMAND:docker}
     container-prefix: ${TERMINAL_CONTAINER_PREFIX:funclaw}
