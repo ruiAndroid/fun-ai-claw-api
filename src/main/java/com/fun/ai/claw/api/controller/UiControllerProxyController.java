@@ -46,6 +46,9 @@ public class UiControllerProxyController {
     private static final Pattern CONFIG_PATH_CAMEL_PATTERN = Pattern.compile("(?i)\"configPath\"\\s*:\\s*\"[^\"]*\"");
     private static final Pattern STATUS_PAIRED_FALSE_PATTERN = Pattern.compile("(?i)\"paired\"\\s*:\\s*false");
     private static final Pattern API_KEYS_PATTERN = Pattern.compile("(?is)\\bapi_keys\\s*=\\s*\\[(.*?)]");
+    private static final Pattern DEFAULT_PROVIDER_PATTERN = Pattern.compile("(?m)^\\s*default_provider\\s*=\\s*\"([^\"]+)\"\\s*$");
+    private static final Pattern TOP_LEVEL_API_KEY_PATTERN = Pattern.compile("(?m)^\\s*api_key\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
+    private static final Pattern SECTION_HEADER_PATTERN = Pattern.compile("(?m)^\\[[^\\]]+\\]\\s*$");
     private static final Pattern QUOTED_STRING_PATTERN = Pattern.compile("\"((?:\\\\.|[^\"\\\\])*)\"");
 
     private static final Set<String> SKIPPED_REQUEST_HEADERS = Set.of(
@@ -514,6 +517,7 @@ public class UiControllerProxyController {
         }
 
         byte[] normalizedBody = restoreMaskedApiKeysIfNeeded(instanceId, inboundRequest, requestBody);
+        normalizedBody = normalizeCustomProviderApiKeyIfNeeded(inboundRequest, normalizedBody);
         if (!forceConfigPathOnSave) {
             return normalizedBody;
         }
@@ -595,6 +599,78 @@ public class UiControllerProxyController {
         return requestBody;
     }
 
+    private byte[] normalizeCustomProviderApiKeyIfNeeded(HttpServletRequest inboundRequest, byte[] requestBody) {
+        if (requestBody == null || requestBody.length == 0) {
+            return requestBody;
+        }
+        String contentType = inboundRequest.getContentType();
+        if (!StringUtils.hasText(contentType) || !contentType.toLowerCase(Locale.ROOT).contains("toml")) {
+            return requestBody;
+        }
+
+        String raw = new String(requestBody, StandardCharsets.UTF_8);
+        String rewritten = normalizeCustomProviderApiKey(raw);
+        if (rewritten.equals(raw)) {
+            return requestBody;
+        }
+        return rewritten.getBytes(StandardCharsets.UTF_8);
+    }
+
+    private String normalizeCustomProviderApiKey(String toml) {
+        if (!StringUtils.hasText(toml)) {
+            return toml;
+        }
+        String provider = extractDefaultProvider(toml);
+        if (!StringUtils.hasText(provider)) {
+            return toml;
+        }
+        String providerLower = provider.toLowerCase(Locale.ROOT).trim();
+        if (!providerLower.startsWith("custom:") && !providerLower.startsWith("anthropic-custom:")) {
+            return toml;
+        }
+
+        int firstSectionStart = findFirstSectionStart(toml);
+        String topLevel = firstSectionStart >= 0 ? toml.substring(0, firstSectionStart) : toml;
+        String remainder = firstSectionStart >= 0 ? toml.substring(firstSectionStart) : "";
+
+        Matcher topApiKeyMatcher = TOP_LEVEL_API_KEY_PATTERN.matcher(topLevel);
+        if (topApiKeyMatcher.find()) {
+            String existing = unescapeTomlString(topApiKeyMatcher.group(1)).trim();
+            if (StringUtils.hasText(existing) && !"***MASKED***".equals(existing)) {
+                return toml;
+            }
+        }
+
+        String candidate = firstUsableApiKey(extractApiKeys(toml));
+        if (!StringUtils.hasText(candidate)) {
+            return toml;
+        }
+
+        String sanitizedTopLevel = TOP_LEVEL_API_KEY_PATTERN.matcher(topLevel).replaceAll("");
+        if (!sanitizedTopLevel.isEmpty() && !sanitizedTopLevel.endsWith("\n")) {
+            sanitizedTopLevel += "\n";
+        }
+        sanitizedTopLevel += "api_key = \"" + escapeTomlString(candidate) + "\"\n";
+        log.info("ui proxy normalized top-level api_key from api_keys list for custom provider");
+        return sanitizedTopLevel + remainder;
+    }
+
+    private String extractDefaultProvider(String toml) {
+        Matcher matcher = DEFAULT_PROVIDER_PATTERN.matcher(toml);
+        if (!matcher.find()) {
+            return null;
+        }
+        return matcher.group(1);
+    }
+
+    private int findFirstSectionStart(String toml) {
+        Matcher matcher = SECTION_HEADER_PATTERN.matcher(toml);
+        if (!matcher.find()) {
+            return -1;
+        }
+        return matcher.start();
+    }
+
     private String readCurrentConfigFromContainer(UUID instanceId) {
         if (!StringUtils.hasText(containerPrefix) || !StringUtils.hasText(configSaveFallbackPath)) {
             return null;
@@ -630,6 +706,23 @@ public class UiControllerProxyController {
             keys.add(unescapeTomlString(quotedMatcher.group(1)));
         }
         return keys;
+    }
+
+    private String firstUsableApiKey(List<String> keys) {
+        if (keys == null || keys.isEmpty()) {
+            return null;
+        }
+        for (String key : keys) {
+            if (!StringUtils.hasText(key)) {
+                continue;
+            }
+            String trimmed = key.trim();
+            if ("***MASKED***".equals(trimmed)) {
+                continue;
+            }
+            return trimmed;
+        }
+        return null;
     }
 
     private String replaceApiKeys(String toml, List<String> keys) {
