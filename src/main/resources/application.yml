@@ -2,8 +2,6 @@ server:
   port: 8080
 
 spring:
-  config:
-    import: optional:file:./application-private.yml
   application:
     name: fun-ai-claw-api
   datasource:
@@ -35,12 +33,6 @@ app:
     upstream-scheme: ${UI_CONTROLLER_UPSTREAM_SCHEME:http}
     upstream-host: ${UI_CONTROLLER_UPSTREAM_HOST:127.0.0.1}
     request-timeout-seconds: ${UI_CONTROLLER_REQUEST_TIMEOUT_SECONDS:60}
-  llm-gateway:
-    base-url: ${LLM_GATEWAY_BASE_URL:https://api.ai.fun.tv/v1}
-    auth-token: ${LLM_GATEWAY_AUTH_TOKEN:}
-    auth-scheme: ${LLM_GATEWAY_AUTH_SCHEME:Bearer}
-    timeout-seconds: ${LLM_GATEWAY_TIMEOUT_SECONDS:120}
-    prefer-incoming-authorization: ${LLM_GATEWAY_PREFER_INCOMING_AUTHORIZATION:true}
   pairing-code:
     fixed-code: ""
     fixed-link-path: /

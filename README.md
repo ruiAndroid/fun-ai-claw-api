@@ -24,18 +24,6 @@ Default database config is in `src/main/resources/application.yml` and points to
 
 Schema is auto-initialized at startup via `src/main/resources/schema.sql`.
 
-## File-based private config
-
-`application.yml` now imports optional local file:
-
-- `./application-private.yml`
-
-Recommended:
-
-1. Copy `application-private.example.yml` to `application-private.yml`
-2. Fill your real `app.llm-gateway.auth-token`
-3. Keep `application-private.yml` out of git (already in `.gitignore`)
-
 ## Current Scope
 
 - `GET /v1/health`
@@ -44,15 +32,6 @@ Recommended:
 - `POST /v1/instances`
 - `DELETE /v1/instances/{instanceId}`
 - `POST /v1/instances/{instanceId}/actions`
-- `GET /v1/models`
-- `POST /v1/chat/completions`
-- `POST /v1/messages`
-
-Compatible aliases:
-
-- `GET /api/v1/models`
-- `POST /api/v1/chat/completions`
-- `POST /api/v1/messages`
 
 ## Runtime Image Presets
 
@@ -77,32 +56,6 @@ app:
   - `PLANE_BASE_URL` (default: `http://127.0.0.1:8090/internal/v1`)
   - `PLANE_REQUESTED_BY` (default: `fun-ai-claw-api`)
 - Set `ZEROCLAW_PRESET_IMAGE` in deployment env to point to your own registry mirror.
-
-## LLM Data API
-
-This service now exposes a unified LLM data plane for agents.
-Agents should call `fun-ai-claw-api` endpoints instead of calling vendor APIs directly.
-
-Configuration (`src/main/resources/application.yml`):
-
-- `LLM_GATEWAY_BASE_URL` (default: `https://api.ai.fun.tv/v1`)
-- `LLM_GATEWAY_AUTH_TOKEN` (default: empty)
-- `LLM_GATEWAY_AUTH_SCHEME` (default: `Bearer`)
-- `LLM_GATEWAY_TIMEOUT_SECONDS` (default: `120`)
-- `LLM_GATEWAY_PREFER_INCOMING_AUTHORIZATION` (default: `true`)
-
-Or use file config (`application-private.yml`) with the same keys under:
-
-- `app.llm-gateway.base-url`
-- `app.llm-gateway.auth-token`
-- `app.llm-gateway.auth-scheme`
-- `app.llm-gateway.timeout-seconds`
-- `app.llm-gateway.prefer-incoming-authorization`
-
-Behavior:
-
-- If `LLM_GATEWAY_PREFER_INCOMING_AUTHORIZATION=true` and request includes `Authorization`, forward it upstream.
-- Otherwise use configured `LLM_GATEWAY_AUTH_TOKEN`.
 
 ## Update Script
 
