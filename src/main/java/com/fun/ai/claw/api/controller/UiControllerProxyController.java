@@ -42,6 +42,7 @@ public class UiControllerProxyController {
     private static final String ZEROCLAW_DEFAULT_CONFIG_PATH = "/data/zeroclaw/config.toml";
     private static final Pattern CONFIG_PATH_PATTERN = Pattern.compile("(?i)\"config_path\"\\s*:\\s*\"[^\"]*\"");
     private static final Pattern CONFIG_PATH_CAMEL_PATTERN = Pattern.compile("(?i)\"configPath\"\\s*:\\s*\"[^\"]*\"");
+    private static final Pattern STATUS_PAIRED_FALSE_PATTERN = Pattern.compile("(?i)\"paired\"\\s*:\\s*false");
 
     private static final Set<String> SKIPPED_REQUEST_HEADERS = Set.of(
             "host",
@@ -191,7 +192,7 @@ public class UiControllerProxyController {
             }
             log.warn("ui proxy fallback execution failed for instanceId={}, uri={}", instanceId, targetUri);
         }
-        return buildResponse(instanceId, upstreamResponse);
+        return buildResponse(instanceId, targetUri, upstreamResponse);
     }
 
     private URI buildTargetUri(UUID instanceId, int targetPort, HttpServletRequest request) {
@@ -566,8 +567,8 @@ public class UiControllerProxyController {
         }
     }
 
-    private ResponseEntity<byte[]> buildResponse(UUID instanceId, HttpResponse<byte[]> upstreamResponse) {
-        byte[] responseBody = rewriteUiAssetRootPath(instanceId, upstreamResponse);
+    private ResponseEntity<byte[]> buildResponse(UUID instanceId, URI targetUri, HttpResponse<byte[]> upstreamResponse) {
+        byte[] responseBody = rewriteUiAssetRootPath(instanceId, targetUri, upstreamResponse);
         HttpHeaders responseHeaders = new HttpHeaders();
         upstreamResponse.headers().map().forEach((headerName, values) -> {
             if (shouldSkipResponseHeader(headerName)) {
@@ -587,13 +588,15 @@ public class UiControllerProxyController {
         );
     }
 
-    private byte[] rewriteUiAssetRootPath(UUID instanceId, HttpResponse<byte[]> upstreamResponse) {
+    private byte[] rewriteUiAssetRootPath(UUID instanceId, URI targetUri, HttpResponse<byte[]> upstreamResponse) {
         String contentType = upstreamResponse.headers()
                 .firstValue("content-type")
                 .orElse("")
                 .toLowerCase(Locale.ROOT);
 
         boolean htmlContent = contentType.contains("text/html");
+        boolean statusJson = isStatusEndpoint(targetUri != null ? targetUri.getPath() : null)
+                && contentType.contains("application/json");
         boolean rewritable = contentType.contains("text/html")
                 || contentType.contains("javascript")
                 || contentType.contains("application/json");
@@ -621,6 +624,9 @@ public class UiControllerProxyController {
                 .replace("'/pair'", "'" + uiBase + "/pair'")
                 .replace("'/pair?", "'" + uiBase + "/pair?")
                 .replace("'/pair/", "'" + uiBase + "/pair/");
+        if (statusJson) {
+            rewritten = STATUS_PAIRED_FALSE_PATTERN.matcher(rewritten).replaceFirst("\"paired\":true");
+        }
         if (htmlContent) {
             rewritten = injectUiUrlShim(rewritten, uiBase, autoAuthQueryParam, authTokenQueryParam);
         }
@@ -629,6 +635,15 @@ public class UiControllerProxyController {
             return source;
         }
         return rewritten.getBytes(StandardCharsets.UTF_8);
+    }
+
+    private boolean isStatusEndpoint(String path) {
+        if (!StringUtils.hasText(path)) {
+            return false;
+        }
+        return "/api/status".equals(path)
+                || "/api/status/".equals(path)
+                || path.startsWith("/api/status/");
     }
 
     private boolean shouldSkipRequestHeader(String headerName) {
