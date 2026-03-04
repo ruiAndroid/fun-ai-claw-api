@@ -386,9 +386,10 @@ public class UiControllerProxyController {
                 dockerCommand,
                 "exec",
                 containerName,
-                "sh",
-                "-lc",
-                "mkdir -p " + shellQuote(directory)
+                "/bin/busybox",
+                "mkdir",
+                "-p",
+                directory
         ), null);
         if (mkdirResult.exitCode != 0) {
             log.warn("ui proxy fallback mkdir failed for {}: {}", containerName, mkdirResult.output);
@@ -400,9 +401,10 @@ public class UiControllerProxyController {
                 "exec",
                 "-i",
                 containerName,
-                "sh",
-                "-lc",
-                "cat > " + shellQuote(path)
+                "/bin/busybox",
+                "dd",
+                "of=" + path,
+                "conv=fsync"
         ), configBytes);
         if (writeResult.exitCode != 0) {
             log.warn("ui proxy fallback write failed for {}: {}", containerName, writeResult.output);
@@ -440,10 +442,6 @@ public class UiControllerProxyController {
             Thread.currentThread().interrupt();
             return new CommandResult(130, "interrupted");
         }
-    }
-
-    private String shellQuote(String value) {
-        return "'" + value.replace("'", "'\"'\"'") + "'";
     }
 
     private record CommandResult(int exitCode, String output) {
