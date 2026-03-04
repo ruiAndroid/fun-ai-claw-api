@@ -984,11 +984,11 @@ public class UiControllerProxyController {
                     return true;
                   }
                   if (tryApplyAutoAuthToken()) { return; }
-                  // No-pairing mode fallback: ensure UI has a local token placeholder.
+                  // Cleanup legacy placeholder token that can break ws/chat auth flow.
                   try {
                     var existingToken = window.localStorage.getItem('zeroclaw_token');
-                    if (!existingToken) {
-                      window.localStorage.setItem('zeroclaw_token', 'public-access');
+                    if (existingToken === 'public-access') {
+                      window.localStorage.removeItem('zeroclaw_token');
                     }
                   } catch (e) {
                     // ignore storage errors and continue normal flow
