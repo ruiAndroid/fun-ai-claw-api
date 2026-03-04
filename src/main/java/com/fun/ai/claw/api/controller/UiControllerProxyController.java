@@ -1070,11 +1070,31 @@ public class UiControllerProxyController {
                   }
                   var NativeWebSocket = window.WebSocket;
                   if (NativeWebSocket) {
-                    window.WebSocket = function (url, protocols) {
+                    var WrappedWebSocket = function (url, protocols) {
                       var rewritten = rewriteUrlLike(url);
                       return protocols === undefined ? new NativeWebSocket(rewritten) : new NativeWebSocket(rewritten, protocols);
                     };
-                    window.WebSocket.prototype = NativeWebSocket.prototype;
+                    WrappedWebSocket.prototype = NativeWebSocket.prototype;
+                    // Preserve static constants so app readiness checks still work.
+                    WrappedWebSocket.CONNECTING = NativeWebSocket.CONNECTING;
+                    WrappedWebSocket.OPEN = NativeWebSocket.OPEN;
+                    WrappedWebSocket.CLOSING = NativeWebSocket.CLOSING;
+                    WrappedWebSocket.CLOSED = NativeWebSocket.CLOSED;
+                    if (typeof NativeWebSocket === 'function') {
+                      try {
+                        Object.getOwnPropertyNames(NativeWebSocket).forEach(function (key) {
+                          if (key === 'prototype' || key === 'length' || key === 'name') { return; }
+                          try {
+                            WrappedWebSocket[key] = NativeWebSocket[key];
+                          } catch (e) {
+                            // ignore read-only static props
+                          }
+                        });
+                      } catch (e) {
+                        // ignore reflection errors
+                      }
+                    }
+                    window.WebSocket = WrappedWebSocket;
                   }
                   var NativeEventSource = window.EventSource;
                   if (NativeEventSource) {
