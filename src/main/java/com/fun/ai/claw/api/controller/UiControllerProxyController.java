@@ -15,11 +15,13 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -157,9 +159,9 @@ public class UiControllerProxyController {
             },
             headers = "!Upgrade"
     )
-    public ResponseEntity<byte[]> proxy(@PathVariable UUID instanceId,
-                                        HttpServletRequest request,
-                                        @RequestBody(required = false) byte[] requestBody) {
+    public ResponseEntity<?> proxy(@PathVariable UUID instanceId,
+                                   HttpServletRequest request,
+                                   @RequestBody(required = false) byte[] requestBody) {
         ClawInstanceDto instance = instanceRepository.findById(instanceId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "instance not found"));
 
@@ -172,6 +174,9 @@ public class UiControllerProxyController {
         }
 
         URI targetUri = buildTargetUri(instanceId, gatewayHostPort, request);
+        if (isEventsEndpoint(targetUri.getPath())) {
+            return proxyEventStream(request, targetUri);
+        }
         byte[] normalizedRequestBody = rewriteConfigSavePayloadIfNeeded(instanceId, request, requestBody, targetUri);
         HttpRequest outboundRequest = buildOutboundRequest(request, normalizedRequestBody, targetUri);
         HttpResponse<byte[]> upstreamResponse = send(outboundRequest);
@@ -214,6 +219,35 @@ public class UiControllerProxyController {
         return buildResponse(instanceId, targetUri, upstreamResponse);
     }
 
+    private ResponseEntity<StreamingResponseBody> proxyEventStream(HttpServletRequest request, URI targetUri) {
+        HttpRequest outboundRequest = buildEventStreamRequest(request, targetUri);
+        HttpResponse<InputStream> upstreamResponse = sendEventStream(outboundRequest);
+        InputStream upstreamBody = upstreamResponse.body();
+
+        HttpHeaders responseHeaders = new HttpHeaders();
+        upstreamResponse.headers().map().forEach((headerName, values) -> {
+            if (shouldSkipResponseHeader(headerName)) {
+                return;
+            }
+            if ("set-cookie".equalsIgnoreCase(headerName)) {
+                responseHeaders.put(headerName, rewriteSetCookiePaths(values));
+                return;
+            }
+            responseHeaders.put(headerName, new ArrayList<>(values));
+        });
+        if (!responseHeaders.containsKey(HttpHeaders.CONTENT_TYPE)) {
+            responseHeaders.set(HttpHeaders.CONTENT_TYPE, "text/event-stream;charset=UTF-8");
+        }
+
+        StreamingResponseBody stream = outputStream -> {
+            try (InputStream body = upstreamBody) {
+                body.transferTo(outputStream);
+                outputStream.flush();
+            }
+        };
+        return new ResponseEntity<>(stream, responseHeaders, HttpStatusCode.valueOf(upstreamResponse.statusCode()));
+    }
+
     private URI buildTargetUri(UUID instanceId, int targetPort, HttpServletRequest request) {
         String requestUri = request.getRequestURI();
         String downstreamPath = "/";
@@ -245,6 +279,15 @@ public class UiControllerProxyController {
             uriBuilder.append("?").append(queryString);
         }
         return URI.create(uriBuilder.toString());
+    }
+
+    private boolean isEventsEndpoint(String path) {
+        if (!StringUtils.hasText(path)) {
+            return false;
+        }
+        return "/api/events".equals(path)
+                || "/api/events/".equals(path)
+                || path.startsWith("/api/events/");
     }
 
     private String appendConfigPathQueryIfMissing(String queryString) {
@@ -487,6 +530,15 @@ public class UiControllerProxyController {
         if (StringUtils.hasText(forcedContentType)) {
             outboundBuilder.setHeader("Content-Type", forcedContentType);
         }
+        addConfigPathHeadersIfNeeded(outboundBuilder, targetUri);
+        return outboundBuilder.build();
+    }
+
+    private HttpRequest buildEventStreamRequest(HttpServletRequest inboundRequest, URI targetUri) {
+        HttpRequest.Builder outboundBuilder = HttpRequest.newBuilder()
+                .uri(targetUri)
+                .GET();
+        copyRequestHeaders(inboundRequest, outboundBuilder);
         addConfigPathHeadersIfNeeded(outboundBuilder, targetUri);
         return outboundBuilder.build();
     }
@@ -812,6 +864,38 @@ public class UiControllerProxyController {
         }
         String message = lastIoException == null ? "unknown io error" : lastIoException.getMessage();
         throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "failed to proxy ui request: " + message);
+    }
+
+    private HttpResponse<InputStream> sendEventStream(HttpRequest outboundRequest) {
+        IOException lastIoException = null;
+        for (int attempt = 1; attempt <= upstreamRetryAttempts; attempt++) {
+            try {
+                return httpClient.send(outboundRequest, HttpResponse.BodyHandlers.ofInputStream());
+            } catch (IOException ex) {
+                lastIoException = ex;
+                if (attempt >= upstreamRetryAttempts) {
+                    break;
+                }
+                log.warn("ui proxy upstream event-stream retry {}/{} uri={} reason={}",
+                        attempt,
+                        upstreamRetryAttempts,
+                        outboundRequest.uri(),
+                        ex.getMessage());
+                if (upstreamRetryDelayMillis > 0) {
+                    try {
+                        Thread.sleep(upstreamRetryDelayMillis);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "ui proxy event-stream interrupted");
+                    }
+                }
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "ui proxy event-stream interrupted");
+            }
+        }
+        String message = lastIoException == null ? "unknown io error" : lastIoException.getMessage();
+        throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "failed to proxy ui event-stream: " + message);
     }
 
     private ResponseEntity<byte[]> buildResponse(UUID instanceId, URI targetUri, HttpResponse<byte[]> upstreamResponse) {
