@@ -235,7 +235,7 @@ public class UiControllerProxyController {
             }
             responseHeaders.put(headerName, new ArrayList<>(values));
         });
-        if (!responseHeaders.containsKey(HttpHeaders.CONTENT_TYPE)) {
+        if (!StringUtils.hasText(responseHeaders.getFirst(HttpHeaders.CONTENT_TYPE))) {
             responseHeaders.set(HttpHeaders.CONTENT_TYPE, "text/event-stream;charset=UTF-8");
         }
 
