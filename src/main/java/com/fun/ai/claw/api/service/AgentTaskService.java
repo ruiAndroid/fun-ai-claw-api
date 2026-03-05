@@ -52,6 +52,16 @@ public class AgentTaskService {
             Pattern.compile("(?is)\"full_response\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
     private static final Pattern MESSAGE_FIELD_PATTERN =
             Pattern.compile("(?is)\"message\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
+    private static final Pattern OUTPUT_TEXT_FIELD_PATTERN =
+            Pattern.compile("(?is)\"output_text\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
+    private static final Pattern RESULT_FIELD_PATTERN =
+            Pattern.compile("(?is)\"result\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
+    private static final Pattern TEXT_FIELD_PATTERN =
+            Pattern.compile("(?is)\"text\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
+    private static final Pattern DELTA_FIELD_PATTERN =
+            Pattern.compile("(?is)\"delta\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
+    private static final Pattern MESSAGE_CONTENT_FIELD_PATTERN =
+            Pattern.compile("(?is)\"message\"\\s*:\\s*\\{[\\s\\S]*?\"content\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
 
     private final InstanceRepository instanceRepository;
     private final AgentTaskRepository repository;
@@ -139,9 +149,12 @@ public class AgentTaskService {
             String routeTrace = outcome.routeTrace();
             String responseText = result.responseText();
             if (!StringUtils.hasText(responseText)) {
+                String rawPreview = truncate(result.rawBody(), 500);
+                String details = "empty response from gateway (" + result.source() + ")"
+                        + (StringUtils.hasText(rawPreview) ? ", rawPreview=" + rawPreview : "");
                 repository.markFailed(
                         task.taskId(),
-                        withRouteTrace("empty response from gateway (" + result.source() + ")", routeTrace),
+                        withRouteTrace(details, routeTrace),
                         Instant.now()
                 );
                 return;
@@ -415,6 +428,19 @@ public class AgentTaskService {
         return unescapeJsonString(matcher.group(1));
     }
 
+    private String extractFirstJsonField(String json, Pattern... patterns) {
+        if (!StringUtils.hasText(json) || patterns == null || patterns.length == 0) {
+            return "";
+        }
+        for (Pattern pattern : patterns) {
+            String value = extractJsonField(json, pattern);
+            if (StringUtils.hasText(value)) {
+                return value;
+            }
+        }
+        return "";
+    }
+
     private boolean looksLikeRawToolCall(String text) {
         if (!StringUtils.hasText(text)) {
             return false;
@@ -465,6 +491,7 @@ public class AgentTaskService {
     private final class WsChatListener implements WebSocket.Listener {
         private final StringBuilder frameBuffer = new StringBuilder();
         private final StringBuilder chunkBuffer = new StringBuilder();
+        private final StringBuilder toolResultBuffer = new StringBuilder();
         private final StringBuilder rawEvents = new StringBuilder();
         private final CompletableFuture<String> completion = new CompletableFuture<>();
 
@@ -502,6 +529,8 @@ public class AgentTaskService {
             if (!completion.isDone()) {
                 if (chunkBuffer.length() > 0) {
                     completion.complete(chunkBuffer.toString());
+                } else if (toolResultBuffer.length() > 0) {
+                    completion.complete(toolResultBuffer.toString());
                 } else {
                     completion.completeExceptionally(new RuntimeException(
                             "ws chat closed before response, status=" + statusCode + ", reason=" + reason));
@@ -513,17 +542,36 @@ public class AgentTaskService {
         private void handleWsMessage(String message) {
             String type = extractJsonField(message, TYPE_FIELD_PATTERN).toLowerCase();
             switch (type) {
-                case "chunk" -> chunkBuffer.append(extractJsonField(message, CONTENT_FIELD_PATTERN));
+                case "chunk", "delta", "response.output_text.delta", "response.output.delta" ->
+                        appendNormalized(chunkBuffer, extractChunkText(message));
+                case "tool_result" -> appendNormalized(toolResultBuffer, extractToolResultText(message));
+                case "response.output_text.done", "response.output.done" ->
+                        appendNormalized(chunkBuffer, extractTerminalResponseText(message));
                 case "message", "done" -> {
-                    String response = extractJsonField(message, FULL_RESPONSE_FIELD_PATTERN);
-                    if (!StringUtils.hasText(response)) {
-                        response = extractJsonField(message, CONTENT_FIELD_PATTERN);
-                    }
-                    if (!StringUtils.hasText(response)) {
-                        response = chunkBuffer.toString();
-                    }
+                    String response = extractTerminalResponseText(message);
                     if (!completion.isDone()) {
                         completion.complete(response);
+                    }
+                }
+                case "response.completed", "response.done" -> {
+                    String response = extractTerminalResponseText(message);
+                    if (!completion.isDone()) {
+                        completion.complete(response);
+                    }
+                }
+                case "response.failed" -> {
+                    String error = extractFirstJsonField(
+                            message,
+                            MESSAGE_FIELD_PATTERN,
+                            RESULT_FIELD_PATTERN,
+                            RESPONSE_FIELD_PATTERN,
+                            TEXT_FIELD_PATTERN
+                    );
+                    if (!StringUtils.hasText(error)) {
+                        error = "ws chat response failed";
+                    }
+                    if (!completion.isDone()) {
+                        completion.completeExceptionally(new RuntimeException(error));
                     }
                 }
                 case "error" -> {
@@ -536,9 +584,62 @@ public class AgentTaskService {
                     }
                 }
                 default -> {
-                    // Ignore tool_call/tool_result/unknown events; wait for done/message.
+                    // Ignore tool_call/unknown events; wait for done/message.
                 }
             }
+        }
+
+        private String extractChunkText(String message) {
+            return extractFirstJsonField(
+                    message,
+                    CONTENT_FIELD_PATTERN,
+                    DELTA_FIELD_PATTERN,
+                    RESPONSE_FIELD_PATTERN,
+                    OUTPUT_TEXT_FIELD_PATTERN,
+                    TEXT_FIELD_PATTERN
+            );
+        }
+
+        private String extractToolResultText(String message) {
+            return extractFirstJsonField(
+                    message,
+                    RESULT_FIELD_PATTERN,
+                    RESPONSE_FIELD_PATTERN,
+                    OUTPUT_TEXT_FIELD_PATTERN,
+                    MESSAGE_CONTENT_FIELD_PATTERN,
+                    CONTENT_FIELD_PATTERN,
+                    TEXT_FIELD_PATTERN
+            );
+        }
+
+        private String extractTerminalResponseText(String message) {
+            String response = extractFirstJsonField(
+                    message,
+                    FULL_RESPONSE_FIELD_PATTERN,
+                    OUTPUT_TEXT_FIELD_PATTERN,
+                    RESPONSE_FIELD_PATTERN,
+                    RESULT_FIELD_PATTERN,
+                    MESSAGE_CONTENT_FIELD_PATTERN,
+                    CONTENT_FIELD_PATTERN,
+                    TEXT_FIELD_PATTERN
+            );
+            if (!StringUtils.hasText(response)) {
+                response = chunkBuffer.toString();
+            }
+            if (!StringUtils.hasText(response)) {
+                response = toolResultBuffer.toString();
+            }
+            return response;
+        }
+
+        private void appendNormalized(StringBuilder builder, String text) {
+            if (!StringUtils.hasText(text)) {
+                return;
+            }
+            if (builder.length() > 0) {
+                builder.append('\n');
+            }
+            builder.append(text);
         }
 
         String await(Duration timeout) throws TimeoutException {
