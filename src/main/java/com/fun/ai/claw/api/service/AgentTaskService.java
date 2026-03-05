@@ -7,6 +7,8 @@ import com.fun.ai.claw.api.model.AgentTaskResponse;
 import com.fun.ai.claw.api.model.ClawInstanceDto;
 import com.fun.ai.claw.api.repository.AgentTaskRepository;
 import com.fun.ai.claw.api.repository.InstanceRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.http.HttpStatus;
@@ -24,7 +26,9 @@ import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -37,6 +41,7 @@ import java.util.regex.Pattern;
 
 @Service
 public class AgentTaskService {
+    private static final Logger log = LoggerFactory.getLogger(AgentTaskService.class);
     private static final Pattern RESPONSE_FIELD_PATTERN =
             Pattern.compile("(?is)\"response\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
     private static final Pattern TYPE_FIELD_PATTERN =
@@ -58,6 +63,7 @@ public class AgentTaskService {
     private final String dispatchMode;
     private final boolean preferWsChat;
     private final boolean preferApiChat;
+    private final boolean allowWebhookFallback;
     private final int wsChatTimeoutSeconds;
 
     public AgentTaskService(InstanceRepository instanceRepository,
@@ -69,6 +75,7 @@ public class AgentTaskService {
                             @Value("${app.agent-task.dispatch-mode:force_delegate}") String dispatchMode,
                             @Value("${app.agent-task.prefer-ws-chat:true}") boolean preferWsChat,
                             @Value("${app.agent-task.prefer-api-chat:true}") boolean preferApiChat,
+                            @Value("${app.agent-task.allow-webhook-fallback:true}") boolean allowWebhookFallback,
                             @Value("${app.agent-task.ws-chat-timeout-seconds:120}") int wsChatTimeoutSeconds,
                             @Value("${app.agent-task.webhook-timeout-seconds:90}") int webhookTimeoutSeconds) {
         this.instanceRepository = instanceRepository;
@@ -79,6 +86,7 @@ public class AgentTaskService {
         this.dispatchMode = normalizeDispatchMode(dispatchMode);
         this.preferWsChat = preferWsChat;
         this.preferApiChat = preferApiChat;
+        this.allowWebhookFallback = allowWebhookFallback;
         this.wsChatTimeoutSeconds = Math.max(wsChatTimeoutSeconds, 10);
 
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
@@ -126,22 +134,31 @@ public class AgentTaskService {
         Instant runningAt = Instant.now();
         repository.markRunning(task.taskId(), runningAt);
         try {
-            InvocationResult result = invokeGateway(task);
+            InvocationOutcome outcome = invokeGateway(task);
+            InvocationResult result = outcome.result();
+            String routeTrace = outcome.routeTrace();
             String responseText = result.responseText();
             if (!StringUtils.hasText(responseText)) {
-                repository.markFailed(task.taskId(), "empty response from gateway (" + result.source() + ")", Instant.now());
+                repository.markFailed(
+                        task.taskId(),
+                        withRouteTrace("empty response from gateway (" + result.source() + ")", routeTrace),
+                        Instant.now()
+                );
                 return;
             }
             if (looksLikeRawToolCall(responseText)) {
                 String preview = truncate(responseText, 300);
                 repository.markFailed(
                         task.taskId(),
-                        "model returned raw tool-call markup; tools may not have executed. source=" + result.source() + ", preview=" + preview,
+                        withRouteTrace("model returned raw tool-call markup; tools may not have executed. source="
+                                + result.source() + ", preview=" + preview, routeTrace),
                         Instant.now()
                 );
                 return;
             }
             repository.markSucceeded(task.taskId(), responseText, Instant.now());
+        } catch (IllegalStateException ex) {
+            repository.markFailed(task.taskId(), ex.getMessage(), Instant.now());
         } catch (RestClientResponseException ex) {
             String details = ex.getResponseBodyAsString();
             String message = "gateway call failed: HTTP " + ex.getStatusCode().value()
@@ -154,26 +171,76 @@ public class AgentTaskService {
         }
     }
 
-    private InvocationResult invokeGateway(AgentTaskRepository.TaskRow task) {
+    private InvocationOutcome invokeGateway(AgentTaskRepository.TaskRow task) {
+        List<String> attempts = new ArrayList<>();
+
         if (preferWsChat) {
             try {
-                return invokeWsChat(task);
-            } catch (Exception ignored) {
-                // Fallback to HTTP endpoints if websocket chat is unavailable.
+                InvocationResult result = invokeWsChat(task);
+                attempts.add("ws_chat=ok");
+                return new InvocationOutcome(result, attemptsSummary(attempts));
+            } catch (Exception ex) {
+                String reason = compactError(ex);
+                attempts.add("ws_chat=fail(" + reason + ")");
+                log.warn("agent-task ws_chat failed, taskId={}, instanceId={}, reason={}",
+                        task.taskId(), task.instanceId(), reason);
             }
+        } else {
+            attempts.add("ws_chat=disabled");
         }
+
         if (preferApiChat) {
             try {
-                return invokeApiChat(task);
+                InvocationResult result = invokeApiChat(task);
+                attempts.add("api_chat=ok");
+                return new InvocationOutcome(result, attemptsSummary(attempts));
             } catch (RestClientResponseException ex) {
                 int status = ex.getStatusCode().value();
-                if (status == 404 || status == 405) {
-                    return invokeWebhook(task);
+                String bodyPreview = truncate(ex.getResponseBodyAsString(), 200);
+                attempts.add("api_chat=http_" + status);
+                if (status != 404 && status != 405 && !allowWebhookFallback) {
+                    throw new IllegalStateException(
+                            "api_chat failed and webhook fallback is disabled. attempts="
+                                    + attemptsSummary(attempts)
+                                    + (StringUtils.hasText(bodyPreview) ? ", body=" + bodyPreview : ""),
+                            ex
+                    );
                 }
-                throw ex;
+                if (status != 404 && status != 405) {
+                    log.warn("agent-task api_chat failed, taskId={}, instanceId={}, status={}, body={}",
+                            task.taskId(), task.instanceId(), status, bodyPreview);
+                }
+            } catch (Exception ex) {
+                String reason = compactError(ex);
+                attempts.add("api_chat=fail(" + reason + ")");
+                if (!allowWebhookFallback) {
+                    throw new IllegalStateException(
+                            "api_chat failed and webhook fallback is disabled. attempts=" + attemptsSummary(attempts),
+                            ex
+                    );
+                }
+                log.warn("agent-task api_chat failed, taskId={}, instanceId={}, reason={}",
+                        task.taskId(), task.instanceId(), reason);
+            }
+        } else {
+            attempts.add("api_chat=disabled");
+        }
+
+        if (allowWebhookFallback) {
+            try {
+                InvocationResult result = invokeWebhook(task);
+                attempts.add("webhook=ok");
+                return new InvocationOutcome(result, attemptsSummary(attempts));
+            } catch (Exception ex) {
+                String reason = compactError(ex);
+                attempts.add("webhook=fail(" + reason + ")");
+                throw new IllegalStateException("all gateway routes failed. attempts=" + attemptsSummary(attempts), ex);
             }
         }
-        return invokeWebhook(task);
+
+        throw new IllegalStateException(
+                "no gateway route succeeded and webhook fallback is disabled. attempts=" + attemptsSummary(attempts)
+        );
     }
 
     private InvocationResult invokeApiChat(AgentTaskRepository.TaskRow task) {
@@ -366,6 +433,35 @@ public class AgentTaskService {
         return value.substring(0, maxLength) + "...";
     }
 
+    private String compactError(Throwable throwable) {
+        if (throwable == null) {
+            return "unknown";
+        }
+        String message = throwable.getMessage();
+        if (!StringUtils.hasText(message) && throwable.getCause() != null) {
+            message = throwable.getCause().getMessage();
+        }
+        if (!StringUtils.hasText(message)) {
+            message = throwable.getClass().getSimpleName();
+        }
+        String normalized = message.replace('\n', ' ').replace('\r', ' ').trim();
+        return truncate(normalized, 180);
+    }
+
+    private String withRouteTrace(String baseMessage, String routeTrace) {
+        if (!StringUtils.hasText(routeTrace)) {
+            return baseMessage;
+        }
+        return baseMessage + ", attempts=" + routeTrace;
+    }
+
+    private String attemptsSummary(List<String> attempts) {
+        if (attempts == null || attempts.isEmpty()) {
+            return "";
+        }
+        return String.join(" -> ", attempts);
+    }
+
     private final class WsChatListener implements WebSocket.Listener {
         private final StringBuilder frameBuffer = new StringBuilder();
         private final StringBuilder chunkBuffer = new StringBuilder();
@@ -461,5 +557,8 @@ public class AgentTaskService {
     }
 
     private record InvocationResult(String responseText, String rawBody, String source) {
+    }
+
+    private record InvocationOutcome(InvocationResult result, String routeTrace) {
     }
 }
