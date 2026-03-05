@@ -8,10 +8,12 @@ import com.fun.ai.claw.api.model.InstanceMainAgentGuidanceResponse;
 import com.fun.ai.claw.api.model.ListResponse;
 import com.fun.ai.claw.api.model.ClawInstanceDto;
 import com.fun.ai.claw.api.model.PairingCodeResponse;
+import com.fun.ai.claw.api.model.SkillDescriptorResponse;
 import com.fun.ai.claw.api.model.UpsertInstanceMainAgentGuidanceRequest;
 import com.fun.ai.claw.api.service.ControlService;
 import com.fun.ai.claw.api.service.InstanceAgentService;
 import com.fun.ai.claw.api.service.InstanceMainAgentGuidanceService;
+import com.fun.ai.claw.api.service.InstanceSkillService;
 import com.fun.ai.claw.api.service.PairingCodeService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -34,15 +36,18 @@ public class InstanceController {
     private final ControlService controlService;
     private final PairingCodeService pairingCodeService;
     private final InstanceAgentService instanceAgentService;
+    private final InstanceSkillService instanceSkillService;
     private final InstanceMainAgentGuidanceService instanceMainAgentGuidanceService;
 
     public InstanceController(ControlService controlService,
                               PairingCodeService pairingCodeService,
                               InstanceAgentService instanceAgentService,
+                              InstanceSkillService instanceSkillService,
                               InstanceMainAgentGuidanceService instanceMainAgentGuidanceService) {
         this.controlService = controlService;
         this.pairingCodeService = pairingCodeService;
         this.instanceAgentService = instanceAgentService;
+        this.instanceSkillService = instanceSkillService;
         this.instanceMainAgentGuidanceService = instanceMainAgentGuidanceService;
     }
 
@@ -72,6 +77,11 @@ public class InstanceController {
     @GetMapping("/{instanceId}/agents")
     public ListResponse<AgentDescriptorResponse> listAgents(@PathVariable UUID instanceId) {
         return new ListResponse<>(instanceAgentService.listAgents(instanceId));
+    }
+
+    @GetMapping("/{instanceId}/skills")
+    public ListResponse<SkillDescriptorResponse> listSkills(@PathVariable UUID instanceId) {
+        return new ListResponse<>(instanceSkillService.listSkills(instanceId));
     }
 
     @GetMapping("/{instanceId}/main-agent-guidance")

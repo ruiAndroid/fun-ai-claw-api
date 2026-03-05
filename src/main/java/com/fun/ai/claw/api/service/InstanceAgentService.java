@@ -29,6 +29,8 @@ public class InstanceAgentService {
     private static final Pattern PROVIDER_PATTERN = Pattern.compile("(?m)^\\s*provider\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
     private static final Pattern MODEL_PATTERN = Pattern.compile("(?m)^\\s*model\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
     private static final Pattern AGENTIC_PATTERN = Pattern.compile("(?m)^\\s*agentic\\s*=\\s*(true|false)\\s*$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern ALLOWED_TOOLS_PATTERN = Pattern.compile("(?ms)^\\s*allowed_tools\\s*=\\s*\\[(.*?)]\\s*$");
+    private static final Pattern ARRAY_QUOTED_STRING_PATTERN = Pattern.compile("\"((?:\\\\.|[^\"\\\\])*)\"|'((?:\\\\.|[^'\\\\])*)'");
 
     private final InstanceRepository instanceRepository;
     private final String dockerCommand;
@@ -92,7 +94,8 @@ public class InstanceAgentService {
             String provider = findStringValue(PROVIDER_PATTERN, block);
             String model = findStringValue(MODEL_PATTERN, block);
             Boolean agentic = findBooleanValue(AGENTIC_PATTERN, block);
-            agents.add(new AgentDescriptorResponse(id, provider, model, agentic));
+            List<String> allowedTools = findStringArrayValue(ALLOWED_TOOLS_PATTERN, block);
+            agents.add(new AgentDescriptorResponse(id, provider, model, agentic, allowedTools));
         }
         return agents;
     }
@@ -123,6 +126,26 @@ public class InstanceAgentService {
             return null;
         }
         return Boolean.parseBoolean(matcher.group(1).trim());
+    }
+
+    private List<String> findStringArrayValue(Pattern pattern, String block) {
+        Matcher matcher = pattern.matcher(block);
+        if (!matcher.find()) {
+            return List.of();
+        }
+        String arrayBody = matcher.group(1);
+        Matcher valueMatcher = ARRAY_QUOTED_STRING_PATTERN.matcher(arrayBody);
+        List<String> values = new ArrayList<>();
+        while (valueMatcher.find()) {
+            String raw = StringUtils.hasText(valueMatcher.group(1))
+                    ? valueMatcher.group(1)
+                    : valueMatcher.group(2);
+            String value = unescapeTomlString(raw).trim();
+            if (StringUtils.hasText(value)) {
+                values.add(value);
+            }
+        }
+        return values;
     }
 
     private String unescapeTomlString(String value) {
