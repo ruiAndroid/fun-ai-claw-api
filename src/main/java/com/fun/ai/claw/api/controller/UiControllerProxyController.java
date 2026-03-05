@@ -141,6 +141,37 @@ public class UiControllerProxyController {
 
     @RequestMapping(
             path = {
+                    "/fun-claw/ui-controller/{instanceId}/api/events",
+                    "/fun-claw/ui-controller/{instanceId}/api/events/**",
+                    "/ui-controller/{instanceId}/api/events",
+                    "/ui-controller/{instanceId}/api/events/**",
+                    "/{instanceId:[0-9a-fA-F\\-]{36}}/api/events",
+                    "/{instanceId:[0-9a-fA-F\\-]{36}}/api/events/**"
+            },
+            method = {
+                    RequestMethod.GET
+            },
+            headers = "!Upgrade"
+    )
+    public ResponseEntity<StreamingResponseBody> proxyEvents(@PathVariable UUID instanceId,
+                                                             HttpServletRequest request) {
+        ClawInstanceDto instance = instanceRepository.findById(instanceId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "instance not found"));
+
+        Integer gatewayHostPort = instance.gatewayHostPort();
+        if (gatewayHostPort == null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "instance gateway host port is not assigned");
+        }
+        if (gatewayHostPort <= 0 || gatewayHostPort > 65535) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "invalid gateway host port");
+        }
+
+        URI targetUri = buildTargetUri(instanceId, gatewayHostPort, request);
+        return proxyEventStream(request, targetUri);
+    }
+
+    @RequestMapping(
+            path = {
                     "/fun-claw/ui-controller/{instanceId}",
                     "/fun-claw/ui-controller/{instanceId}/**",
                     "/ui-controller/{instanceId}",
@@ -159,9 +190,9 @@ public class UiControllerProxyController {
             },
             headers = "!Upgrade"
     )
-    public ResponseEntity<?> proxy(@PathVariable UUID instanceId,
-                                   HttpServletRequest request,
-                                   @RequestBody(required = false) byte[] requestBody) {
+    public ResponseEntity<byte[]> proxy(@PathVariable UUID instanceId,
+                                        HttpServletRequest request,
+                                        @RequestBody(required = false) byte[] requestBody) {
         ClawInstanceDto instance = instanceRepository.findById(instanceId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "instance not found"));
 
@@ -174,9 +205,6 @@ public class UiControllerProxyController {
         }
 
         URI targetUri = buildTargetUri(instanceId, gatewayHostPort, request);
-        if (isEventsEndpoint(targetUri.getPath())) {
-            return proxyEventStream(request, targetUri);
-        }
         byte[] normalizedRequestBody = rewriteConfigSavePayloadIfNeeded(instanceId, request, requestBody, targetUri);
         HttpRequest outboundRequest = buildOutboundRequest(request, normalizedRequestBody, targetUri);
         HttpResponse<byte[]> upstreamResponse = send(outboundRequest);
@@ -279,15 +307,6 @@ public class UiControllerProxyController {
             uriBuilder.append("?").append(queryString);
         }
         return URI.create(uriBuilder.toString());
-    }
-
-    private boolean isEventsEndpoint(String path) {
-        if (!StringUtils.hasText(path)) {
-            return false;
-        }
-        return "/api/events".equals(path)
-                || "/api/events/".equals(path)
-                || path.startsWith("/api/events/");
     }
 
     private String appendConfigPathQueryIfMissing(String queryString) {
