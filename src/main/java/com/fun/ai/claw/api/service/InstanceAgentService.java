@@ -64,56 +64,86 @@ public class InstanceAgentService {
     }
 
     public List<AgentDescriptorResponse> listAgents(UUID instanceId) {
-        LoadedConfig loadedConfig = readConfig(instanceId);
-        if (!StringUtils.hasText(loadedConfig.text())) {
+        List<LoadedConfig> loadedConfigs = readConfigs(instanceId);
+        if (loadedConfigs.isEmpty()) {
             return List.of();
         }
 
-        return parseAgents(loadedConfig.text(), loadedConfig.path()).stream()
+        LoadedConfig selectedConfig = loadedConfigs.get(0);
+        List<AgentDescriptorResponse> selectedAgents = parseAgents(selectedConfig.text(), selectedConfig.path());
+        for (LoadedConfig candidate : loadedConfigs) {
+            List<AgentDescriptorResponse> candidateAgents = parseAgents(candidate.text(), candidate.path());
+            if (!candidateAgents.isEmpty()) {
+                selectedConfig = candidate;
+                selectedAgents = candidateAgents;
+                break;
+            }
+        }
+
+        return selectedAgents.stream()
                 .sorted(Comparator.comparing(AgentDescriptorResponse::id))
                 .toList();
     }
 
     public AgentSystemPromptResponse getAgentSystemPrompt(UUID instanceId, String agentId) {
         String normalizedAgentId = normalizeAgentId(agentId);
-        LoadedConfig loadedConfig = readConfig(instanceId);
-        AgentBlock agentBlock = findAgentBlock(loadedConfig.text(), normalizedAgentId);
-        return new AgentSystemPromptResponse(
-                instanceId,
-                normalizedAgentId,
-                findSystemPromptValue(agentBlock.block()),
-                loadedConfig.path()
-        );
+        for (LoadedConfig loadedConfig : readConfigs(instanceId)) {
+            AgentBlock agentBlock = findAgentBlockOrNull(loadedConfig.text(), normalizedAgentId);
+            if (agentBlock == null) {
+                continue;
+            }
+            return new AgentSystemPromptResponse(
+                    instanceId,
+                    normalizedAgentId,
+                    findSystemPromptValue(agentBlock.block()),
+                    loadedConfig.path()
+            );
+        }
+        throw new ResponseStatusException(HttpStatus.NOT_FOUND, "agent not found");
     }
 
     public AgentSystemPromptResponse upsertAgentSystemPrompt(UUID instanceId,
                                                              String agentId,
                                                              UpsertAgentSystemPromptRequest request) {
         String normalizedAgentId = normalizeAgentId(agentId);
-        LoadedConfig loadedConfig = readConfig(instanceId);
-        AgentBlock agentBlock = findAgentBlock(loadedConfig.text(), normalizedAgentId);
         String normalizedPrompt = request == null ? "" : Objects.toString(request.systemPrompt(), "");
         String escapedPrompt = escapeTomlBasicString(normalizedPrompt);
-        String updatedBlock = upsertSystemPromptInBlock(agentBlock.block(), escapedPrompt);
+        ResponseStatusException lastWriteError = null;
 
-        String updatedConfig = loadedConfig.text().substring(0, agentBlock.start())
-                + updatedBlock
-                + loadedConfig.text().substring(agentBlock.end());
-        writeConfigText(instanceId, loadedConfig.path(), updatedConfig);
+        for (LoadedConfig loadedConfig : readConfigs(instanceId)) {
+            AgentBlock agentBlock = findAgentBlockOrNull(loadedConfig.text(), normalizedAgentId);
+            if (agentBlock == null) {
+                continue;
+            }
+            String updatedBlock = upsertSystemPromptInBlock(agentBlock.block(), escapedPrompt);
+            String updatedConfig = loadedConfig.text().substring(0, agentBlock.start())
+                    + updatedBlock
+                    + loadedConfig.text().substring(agentBlock.end());
+            try {
+                writeConfigText(instanceId, loadedConfig.path(), updatedConfig);
+                return new AgentSystemPromptResponse(
+                        instanceId,
+                        normalizedAgentId,
+                        normalizedPrompt,
+                        loadedConfig.path()
+                );
+            } catch (ResponseStatusException ex) {
+                lastWriteError = ex;
+            }
+        }
 
-        return new AgentSystemPromptResponse(
-                instanceId,
-                normalizedAgentId,
-                normalizedPrompt,
-                loadedConfig.path()
-        );
+        if (lastWriteError != null) {
+            throw lastWriteError;
+        }
+        throw new ResponseStatusException(HttpStatus.NOT_FOUND, "agent not found");
     }
 
-    private LoadedConfig readConfig(UUID instanceId) {
+    private List<LoadedConfig> readConfigs(UUID instanceId) {
         instanceRepository.findById(instanceId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "instance not found"));
         String containerName = containerPrefix + "-" + instanceId;
         List<String> candidatePaths = resolveConfigPathCandidates(containerName);
+        List<LoadedConfig> loadedConfigs = new ArrayList<>();
         CommandResult lastFailure = null;
         for (String candidatePath : candidatePaths) {
             CommandResult result = runCommand(
@@ -125,9 +155,13 @@ public class InstanceAgentService {
                     candidatePath
             );
             if (result.exitCode == 0) {
-                return new LoadedConfig(candidatePath, result.output());
+                loadedConfigs.add(new LoadedConfig(candidatePath, result.output()));
+                continue;
             }
             lastFailure = result;
+        }
+        if (!loadedConfigs.isEmpty()) {
+            return loadedConfigs;
         }
         String details = lastFailure != null && StringUtils.hasText(lastFailure.output())
                 ? ": " + lastFailure.output().trim()
@@ -216,6 +250,14 @@ public class InstanceAgentService {
     }
 
     private AgentBlock findAgentBlock(String configText, String targetAgentId) {
+        AgentBlock agentBlock = findAgentBlockOrNull(configText, targetAgentId);
+        if (agentBlock != null) {
+            return agentBlock;
+        }
+        throw new ResponseStatusException(HttpStatus.NOT_FOUND, "agent not found");
+    }
+
+    private AgentBlock findAgentBlockOrNull(String configText, String targetAgentId) {
         Matcher blockMatcher = AGENT_BLOCK_PATTERN.matcher(configText);
         while (blockMatcher.find()) {
             String rawId = firstNonBlank(
@@ -228,10 +270,10 @@ public class InstanceAgentService {
                 continue;
             }
             if (id.equals(targetAgentId)) {
-                return new AgentBlock(id, blockMatcher.start(), blockMatcher.end(), blockMatcher.group(0));
+                return new AgentBlock(id, blockMatcher.start(), blockMatcher.end(), blockMatcher.group(0), blockMatcher.group(4));
             }
         }
-        throw new ResponseStatusException(HttpStatus.NOT_FOUND, "agent not found");
+        return null;
     }
 
     private String normalizeAgentId(String agentId) {
@@ -433,7 +475,7 @@ public class InstanceAgentService {
         }
     }
 
-    private record AgentBlock(String id, int start, int end, String block) {
+    private record AgentBlock(String id, int start, int end, String fullBlock, String block) {
     }
 
     private record LoadedConfig(String path, String text) {
