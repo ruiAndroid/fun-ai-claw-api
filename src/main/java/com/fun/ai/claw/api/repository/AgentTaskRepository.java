@@ -1,7 +1,7 @@
 package com.fun.ai.claw.api.repository;
 
-import com.fun.ai.claw.api.model.MgcNovelToScriptPrepareRequest;
-import com.fun.ai.claw.api.model.MgcNovelToScriptTaskResponse;
+import com.fun.ai.claw.api.model.AgentTaskPrepareRequest;
+import com.fun.ai.claw.api.model.AgentTaskResponse;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -12,33 +12,30 @@ import java.util.Optional;
 import java.util.UUID;
 
 @Repository
-public class MgcNovelToScriptRepository {
+public class AgentTaskRepository {
 
     private final JdbcTemplate jdbcTemplate;
 
-    public MgcNovelToScriptRepository(JdbcTemplate jdbcTemplate) {
+    public AgentTaskRepository(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
     }
 
     public void insertPrepared(UUID taskId,
                                String confirmToken,
-                               MgcNovelToScriptPrepareRequest request,
+                               AgentTaskPrepareRequest request,
                                String requestMessage,
                                Instant expiresAt,
                                Instant now) {
         jdbcTemplate.update("""
-                        insert into mgc_novel_to_script_task (
-                            task_id, confirm_token, instance_id, script_content, script_type, target_audience, expected_episode_count,
+                        insert into agent_task (
+                            task_id, confirm_token, instance_id, agent_id,
                             status, request_message, expires_at, created_at, updated_at
-                        ) values (?, ?, ?, ?, ?, ?, ?, 'PREPARED', ?, ?, ?, ?)
+                        ) values (?, ?, ?, ?, 'PREPARED', ?, ?, ?, ?)
                         """,
                 taskId,
                 confirmToken,
                 request.instanceId(),
-                request.scriptContent(),
-                request.scriptType(),
-                request.targetAudience(),
-                request.expectedEpisodeCount(),
+                request.agentId(),
                 requestMessage,
                 Timestamp.from(expiresAt),
                 Timestamp.from(now),
@@ -48,7 +45,7 @@ public class MgcNovelToScriptRepository {
 
     public Optional<TaskRow> claimPrepared(String confirmToken, Instant now) {
         int updated = jdbcTemplate.update("""
-                        update mgc_novel_to_script_task
+                        update agent_task
                         set status = 'QUEUED', updated_at = ?
                         where confirm_token = ?
                           and status = 'PREPARED'
@@ -66,7 +63,7 @@ public class MgcNovelToScriptRepository {
 
     public void markRunning(UUID taskId, Instant now) {
         jdbcTemplate.update("""
-                        update mgc_novel_to_script_task
+                        update agent_task
                         set status = 'RUNNING', started_at = ?, updated_at = ?
                         where task_id = ?
                         """,
@@ -78,7 +75,7 @@ public class MgcNovelToScriptRepository {
 
     public void markSucceeded(UUID taskId, String responseBody, Instant now) {
         jdbcTemplate.update("""
-                        update mgc_novel_to_script_task
+                        update agent_task
                         set status = 'SUCCEEDED', response_body = ?, error_message = null, finished_at = ?, updated_at = ?
                         where task_id = ?
                         """,
@@ -91,7 +88,7 @@ public class MgcNovelToScriptRepository {
 
     public void markFailed(UUID taskId, String errorMessage, Instant now) {
         jdbcTemplate.update("""
-                        update mgc_novel_to_script_task
+                        update agent_task
                         set status = 'FAILED', error_message = ?, finished_at = ?, updated_at = ?
                         where task_id = ?
                         """,
@@ -102,14 +99,15 @@ public class MgcNovelToScriptRepository {
         );
     }
 
-    public Optional<MgcNovelToScriptTaskResponse> findTask(UUID taskId) {
-        List<MgcNovelToScriptTaskResponse> rows = jdbcTemplate.query("""
-                        select task_id, status, response_body, error_message, created_at, updated_at, started_at, finished_at
-                        from mgc_novel_to_script_task
+    public Optional<AgentTaskResponse> findTask(UUID taskId) {
+        List<AgentTaskResponse> rows = jdbcTemplate.query("""
+                        select task_id, agent_id, status, response_body, error_message, created_at, updated_at, started_at, finished_at
+                        from agent_task
                         where task_id = ?
                         """,
-                (rs, rowNum) -> new MgcNovelToScriptTaskResponse(
+                (rs, rowNum) -> new AgentTaskResponse(
                         rs.getObject("task_id", UUID.class),
+                        rs.getString("agent_id"),
                         rs.getString("status"),
                         rs.getString("response_body"),
                         rs.getString("error_message"),
@@ -125,13 +123,14 @@ public class MgcNovelToScriptRepository {
 
     private Optional<TaskRow> findByConfirmToken(String confirmToken) {
         List<TaskRow> rows = jdbcTemplate.query("""
-                        select task_id, instance_id, request_message
-                        from mgc_novel_to_script_task
+                        select task_id, instance_id, agent_id, request_message
+                        from agent_task
                         where confirm_token = ?
                         """,
                 (rs, rowNum) -> new TaskRow(
                         rs.getObject("task_id", UUID.class),
                         rs.getObject("instance_id", UUID.class),
+                        rs.getString("agent_id"),
                         rs.getString("request_message")
                 ),
                 confirmToken
@@ -139,7 +138,7 @@ public class MgcNovelToScriptRepository {
         return rows.stream().findFirst();
     }
 
-    public record TaskRow(UUID taskId, UUID instanceId, String requestMessage) {
+    public record TaskRow(UUID taskId, UUID instanceId, String agentId, String requestMessage) {
     }
 }
 

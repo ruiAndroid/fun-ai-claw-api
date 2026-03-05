@@ -1,11 +1,11 @@
 package com.fun.ai.claw.api.controller;
 
-import com.fun.ai.claw.api.model.MgcNovelToScriptConfirmRequest;
-import com.fun.ai.claw.api.model.MgcNovelToScriptConfirmResponse;
-import com.fun.ai.claw.api.model.MgcNovelToScriptPrepareRequest;
-import com.fun.ai.claw.api.model.MgcNovelToScriptPrepareResponse;
-import com.fun.ai.claw.api.model.MgcNovelToScriptTaskResponse;
-import com.fun.ai.claw.api.service.MgcNovelToScriptService;
+import com.fun.ai.claw.api.model.AgentTaskConfirmRequest;
+import com.fun.ai.claw.api.model.AgentTaskConfirmResponse;
+import com.fun.ai.claw.api.model.AgentTaskPrepareRequest;
+import com.fun.ai.claw.api.model.AgentTaskPrepareResponse;
+import com.fun.ai.claw.api.model.AgentTaskResponse;
+import com.fun.ai.claw.api.service.AgentTaskService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,28 +19,28 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/v1/mgc-novel-to-script")
-public class MgcNovelToScriptController {
+@RequestMapping("/v1/agent-tasks")
+public class AgentTaskController {
 
-    private final MgcNovelToScriptService service;
+    private final AgentTaskService service;
 
-    public MgcNovelToScriptController(MgcNovelToScriptService service) {
+    public AgentTaskController(AgentTaskService service) {
         this.service = service;
     }
 
     @PostMapping("/prepare")
-    public MgcNovelToScriptPrepareResponse prepare(@Valid @RequestBody MgcNovelToScriptPrepareRequest request) {
+    public AgentTaskPrepareResponse prepare(@Valid @RequestBody AgentTaskPrepareRequest request) {
         return service.prepare(request);
     }
 
     @PostMapping("/confirm")
     @ResponseStatus(HttpStatus.ACCEPTED)
-    public MgcNovelToScriptConfirmResponse confirm(@Valid @RequestBody MgcNovelToScriptConfirmRequest request) {
+    public AgentTaskConfirmResponse confirm(@Valid @RequestBody AgentTaskConfirmRequest request) {
         return service.confirm(request.confirmToken());
     }
 
     @GetMapping("/tasks/{taskId}")
-    public MgcNovelToScriptTaskResponse getTask(@PathVariable UUID taskId) {
+    public AgentTaskResponse getTask(@PathVariable UUID taskId) {
         return service.getTask(taskId);
     }
 }

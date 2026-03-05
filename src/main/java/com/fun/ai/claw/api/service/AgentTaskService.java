@@ -1,17 +1,17 @@
 package com.fun.ai.claw.api.service;
 
+import com.fun.ai.claw.api.model.AgentTaskConfirmResponse;
+import com.fun.ai.claw.api.model.AgentTaskPrepareRequest;
+import com.fun.ai.claw.api.model.AgentTaskPrepareResponse;
+import com.fun.ai.claw.api.model.AgentTaskResponse;
 import com.fun.ai.claw.api.model.ClawInstanceDto;
-import com.fun.ai.claw.api.model.MgcNovelToScriptConfirmResponse;
-import com.fun.ai.claw.api.model.MgcNovelToScriptPrepareRequest;
-import com.fun.ai.claw.api.model.MgcNovelToScriptPrepareResponse;
-import com.fun.ai.claw.api.model.MgcNovelToScriptTaskResponse;
+import com.fun.ai.claw.api.repository.AgentTaskRepository;
 import com.fun.ai.claw.api.repository.InstanceRepository;
-import com.fun.ai.claw.api.repository.MgcNovelToScriptRepository;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.core.task.TaskExecutor;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.ResourceAccessException;
@@ -28,26 +28,30 @@ import java.util.Optional;
 import java.util.UUID;
 
 @Service
-public class MgcNovelToScriptService {
+public class AgentTaskService {
 
     private final InstanceRepository instanceRepository;
-    private final MgcNovelToScriptRepository repository;
+    private final AgentTaskRepository repository;
     private final TaskExecutor taskExecutor;
     private final RestClient restClient;
     private final String gatewayUrlTemplate;
     private final int confirmTtlSeconds;
+    private final String dispatchMode;
 
-    public MgcNovelToScriptService(InstanceRepository instanceRepository,
-                                   MgcNovelToScriptRepository repository,
-                                   TaskExecutor taskExecutor,
-                                   @Value("${app.gateway.url-template:http://127.0.0.1/fun-claw/ui-controller/{instanceId}}") String gatewayUrlTemplate,
-                                   @Value("${app.mgc-novel-to-script.confirm-ttl-seconds:600}") int confirmTtlSeconds,
-                                   @Value("${app.mgc-novel-to-script.webhook-timeout-seconds:90}") int webhookTimeoutSeconds) {
+    public AgentTaskService(InstanceRepository instanceRepository,
+                            AgentTaskRepository repository,
+                            TaskExecutor taskExecutor,
+                            @Value("${app.gateway.url-template:http://127.0.0.1/fun-claw/ui-controller/{instanceId}}")
+                            String gatewayUrlTemplate,
+                            @Value("${app.agent-task.confirm-ttl-seconds:600}") int confirmTtlSeconds,
+                            @Value("${app.agent-task.dispatch-mode:plain}") String dispatchMode,
+                            @Value("${app.agent-task.webhook-timeout-seconds:90}") int webhookTimeoutSeconds) {
         this.instanceRepository = instanceRepository;
         this.repository = repository;
         this.taskExecutor = taskExecutor;
         this.gatewayUrlTemplate = gatewayUrlTemplate;
         this.confirmTtlSeconds = Math.max(confirmTtlSeconds, 60);
+        this.dispatchMode = normalizeDispatchMode(dispatchMode);
 
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(Duration.ofSeconds(10));
@@ -58,36 +62,36 @@ public class MgcNovelToScriptService {
                 .build();
     }
 
-    public MgcNovelToScriptPrepareResponse prepare(MgcNovelToScriptPrepareRequest request) {
+    public AgentTaskPrepareResponse prepare(AgentTaskPrepareRequest request) {
         validateInstanceExists(request.instanceId());
         Instant now = Instant.now();
         Instant expiresAt = now.plusSeconds(confirmTtlSeconds);
         UUID taskId = UUID.randomUUID();
         String confirmToken = UUID.randomUUID().toString().replace("-", "");
         String requestMessage = buildRequestMessage(request);
-        String summary = buildSummary(request);
+        String summary = "agentId=" + request.agentId() + ", messageLength=" + request.message().length();
         repository.insertPrepared(taskId, confirmToken, request, requestMessage, expiresAt, now);
-        return new MgcNovelToScriptPrepareResponse(taskId, confirmToken, summary, expiresAt);
+        return new AgentTaskPrepareResponse(taskId, confirmToken, summary, expiresAt);
     }
 
-    public MgcNovelToScriptConfirmResponse confirm(String confirmToken) {
+    public AgentTaskConfirmResponse confirm(String confirmToken) {
         if (!StringUtils.hasText(confirmToken)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "confirmToken must not be blank");
         }
         Instant now = Instant.now();
-        MgcNovelToScriptRepository.TaskRow task = repository.claimPrepared(confirmToken.trim(), now)
+        AgentTaskRepository.TaskRow task = repository.claimPrepared(confirmToken.trim(), now)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "confirmToken invalid, expired, or already used"));
 
         taskExecutor.execute(() -> runTask(task));
-        return new MgcNovelToScriptConfirmResponse(task.taskId(), "QUEUED", now);
+        return new AgentTaskConfirmResponse(task.taskId(), "QUEUED", now);
     }
 
-    public MgcNovelToScriptTaskResponse getTask(UUID taskId) {
+    public AgentTaskResponse getTask(UUID taskId) {
         return repository.findTask(taskId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "task not found"));
     }
 
-    private void runTask(MgcNovelToScriptRepository.TaskRow task) {
+    private void runTask(AgentTaskRepository.TaskRow task) {
         Instant runningAt = Instant.now();
         repository.markRunning(task.taskId(), runningAt);
         try {
@@ -133,16 +137,34 @@ public class MgcNovelToScriptService {
         return trimmed + "/webhook";
     }
 
-    private String buildRequestMessage(MgcNovelToScriptPrepareRequest request) {
-        return "剧本类内容：" + request.scriptContent()
-                + "；剧本类型：" + request.scriptType()
-                + "；受众：" + request.targetAudience()
-                + "；期望集数：" + request.expectedEpisodeCount();
+    private String buildRequestMessage(AgentTaskPrepareRequest request) {
+        if ("force_delegate".equals(dispatchMode)) {
+            return buildForceDelegateMessage(request);
+        }
+        return request.message();
     }
 
-    private String buildSummary(MgcNovelToScriptPrepareRequest request) {
-        return "剧本类型=" + request.scriptType()
-                + "，受众=" + request.targetAudience()
-                + "，期望集数=" + request.expectedEpisodeCount();
+    private String buildForceDelegateMessage(AgentTaskPrepareRequest request) {
+        return """
+                请通过 delegate 工具将任务交给指定子智能体执行。
+                规则：
+                1) 只调用一次 delegate 工具。
+                2) agent 必须是 "%s"。
+                3) 禁止递归委托。
+                4) 返回子智能体结果，不要额外发挥。
+                任务内容：
+                %s
+                """.formatted(request.agentId(), request.message());
+    }
+
+    private String normalizeDispatchMode(String mode) {
+        if (!StringUtils.hasText(mode)) {
+            return "plain";
+        }
+        String normalized = mode.trim().toLowerCase();
+        return switch (normalized) {
+            case "force_delegate", "plain" -> normalized;
+            default -> "plain";
+        };
     }
 }

@@ -31,14 +31,11 @@ create table if not exists instance_action (
 create index if not exists idx_instance_action_instance_id on instance_action (instance_id);
 create index if not exists idx_instance_action_accepted_at on instance_action (accepted_at);
 
-create table if not exists mgc_novel_to_script_task (
+create table if not exists agent_task (
     task_id uuid primary key,
     confirm_token varchar(64) not null unique,
     instance_id uuid not null references claw_instance (id) on delete cascade,
-    script_content text not null,
-    script_type varchar(32) not null,
-    target_audience varchar(64) not null,
-    expected_episode_count integer not null,
+    agent_id varchar(128) not null,
     status varchar(16) not null,
     request_message text not null,
     response_body text null,
@@ -50,6 +47,6 @@ create table if not exists mgc_novel_to_script_task (
     updated_at timestamptz not null
 );
 
-create index if not exists idx_mgc_novel_task_status on mgc_novel_to_script_task (status);
-create index if not exists idx_mgc_novel_task_created_at on mgc_novel_to_script_task (created_at);
-create index if not exists idx_mgc_novel_task_expires_at on mgc_novel_to_script_task (expires_at);
+create index if not exists idx_agent_task_status on agent_task (status);
+create index if not exists idx_agent_task_created_at on agent_task (created_at);
+create index if not exists idx_agent_task_expires_at on agent_task (expires_at);

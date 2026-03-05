@@ -3,8 +3,9 @@ package com.fun.ai.claw.api.model;
 import java.time.Instant;
 import java.util.UUID;
 
-public record MgcNovelToScriptTaskResponse(
+public record AgentTaskResponse(
         UUID taskId,
+        String agentId,
         String status,
         String responseBody,
         String errorMessage,
