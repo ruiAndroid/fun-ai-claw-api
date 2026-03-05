@@ -20,12 +20,18 @@ import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.WebSocket;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -33,15 +39,26 @@ import java.util.regex.Pattern;
 public class AgentTaskService {
     private static final Pattern RESPONSE_FIELD_PATTERN =
             Pattern.compile("(?is)\"response\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
+    private static final Pattern TYPE_FIELD_PATTERN =
+            Pattern.compile("(?is)\"type\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
+    private static final Pattern CONTENT_FIELD_PATTERN =
+            Pattern.compile("(?is)\"content\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
+    private static final Pattern FULL_RESPONSE_FIELD_PATTERN =
+            Pattern.compile("(?is)\"full_response\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
+    private static final Pattern MESSAGE_FIELD_PATTERN =
+            Pattern.compile("(?is)\"message\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
 
     private final InstanceRepository instanceRepository;
     private final AgentTaskRepository repository;
     private final TaskExecutor taskExecutor;
     private final RestClient restClient;
+    private final HttpClient wsHttpClient;
     private final String gatewayUrlTemplate;
     private final int confirmTtlSeconds;
     private final String dispatchMode;
+    private final boolean preferWsChat;
     private final boolean preferApiChat;
+    private final int wsChatTimeoutSeconds;
 
     public AgentTaskService(InstanceRepository instanceRepository,
                             AgentTaskRepository repository,
@@ -50,7 +67,9 @@ public class AgentTaskService {
                             String gatewayUrlTemplate,
                             @Value("${app.agent-task.confirm-ttl-seconds:600}") int confirmTtlSeconds,
                             @Value("${app.agent-task.dispatch-mode:force_delegate}") String dispatchMode,
+                            @Value("${app.agent-task.prefer-ws-chat:true}") boolean preferWsChat,
                             @Value("${app.agent-task.prefer-api-chat:true}") boolean preferApiChat,
+                            @Value("${app.agent-task.ws-chat-timeout-seconds:120}") int wsChatTimeoutSeconds,
                             @Value("${app.agent-task.webhook-timeout-seconds:90}") int webhookTimeoutSeconds) {
         this.instanceRepository = instanceRepository;
         this.repository = repository;
@@ -58,7 +77,9 @@ public class AgentTaskService {
         this.gatewayUrlTemplate = gatewayUrlTemplate;
         this.confirmTtlSeconds = Math.max(confirmTtlSeconds, 60);
         this.dispatchMode = normalizeDispatchMode(dispatchMode);
+        this.preferWsChat = preferWsChat;
         this.preferApiChat = preferApiChat;
+        this.wsChatTimeoutSeconds = Math.max(wsChatTimeoutSeconds, 10);
 
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(Duration.ofSeconds(10));
@@ -66,6 +87,9 @@ public class AgentTaskService {
 
         this.restClient = RestClient.builder()
                 .requestFactory(requestFactory)
+                .build();
+        this.wsHttpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(10))
                 .build();
     }
 
@@ -131,6 +155,13 @@ public class AgentTaskService {
     }
 
     private InvocationResult invokeGateway(AgentTaskRepository.TaskRow task) {
+        if (preferWsChat) {
+            try {
+                return invokeWsChat(task);
+            } catch (Exception ignored) {
+                // Fallback to HTTP endpoints if websocket chat is unavailable.
+            }
+        }
         if (preferApiChat) {
             try {
                 return invokeApiChat(task);
@@ -159,6 +190,27 @@ public class AgentTaskService {
 
         String response = extractResponseField(body);
         return new InvocationResult(response, body == null ? "" : body, "api_chat");
+    }
+
+    private InvocationResult invokeWsChat(AgentTaskRepository.TaskRow task) {
+        URI wsChatUri = URI.create(resolveWsChatUrl(task.instanceId()));
+        WsChatListener listener = new WsChatListener();
+        WebSocket webSocket = wsHttpClient.newWebSocketBuilder()
+                .connectTimeout(Duration.ofSeconds(10))
+                .buildAsync(wsChatUri, listener)
+                .join();
+
+        String payload = "{\"type\":\"message\",\"content\":\"" + escapeJson(task.requestMessage()) + "\"}";
+        webSocket.sendText(payload, true).join();
+        String response;
+        try {
+            response = listener.await(Duration.ofSeconds(wsChatTimeoutSeconds));
+        } catch (TimeoutException ex) {
+            webSocket.abort();
+            throw new RuntimeException("ws chat timeout after " + wsChatTimeoutSeconds + "s");
+        }
+        webSocket.sendClose(WebSocket.NORMAL_CLOSURE, "done");
+        return new InvocationResult(response, listener.rawEvents(), "ws_chat");
     }
 
     private InvocationResult invokeWebhook(AgentTaskRepository.TaskRow task) {
@@ -192,6 +244,21 @@ public class AgentTaskService {
     private String resolveApiChatUrl(UUID instanceId) {
         String base = resolveGatewayBaseUrl(instanceId);
         return base + "/api/chat";
+    }
+
+    private String resolveWsChatUrl(UUID instanceId) {
+        String base = resolveGatewayBaseUrl(instanceId);
+        String wsBase;
+        if (base.startsWith("https://")) {
+            wsBase = "wss://" + base.substring("https://".length());
+        } else if (base.startsWith("http://")) {
+            wsBase = "ws://" + base.substring("http://".length());
+        } else if (base.startsWith("wss://") || base.startsWith("ws://")) {
+            wsBase = base;
+        } else {
+            wsBase = "ws://" + base;
+        }
+        return wsBase + "/ws/chat";
     }
 
     private String resolveGatewayBaseUrl(UUID instanceId) {
@@ -258,6 +325,29 @@ public class AgentTaskService {
                 .replace("\\t", "\t");
     }
 
+    private String escapeJson(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
+    }
+
+    private String extractJsonField(String json, Pattern pattern) {
+        if (!StringUtils.hasText(json)) {
+            return "";
+        }
+        Matcher matcher = pattern.matcher(json);
+        if (!matcher.find()) {
+            return "";
+        }
+        return unescapeJsonString(matcher.group(1));
+    }
+
     private boolean looksLikeRawToolCall(String text) {
         if (!StringUtils.hasText(text)) {
             return false;
@@ -274,6 +364,100 @@ public class AgentTaskService {
             return value;
         }
         return value.substring(0, maxLength) + "...";
+    }
+
+    private final class WsChatListener implements WebSocket.Listener {
+        private final StringBuilder frameBuffer = new StringBuilder();
+        private final StringBuilder chunkBuffer = new StringBuilder();
+        private final StringBuilder rawEvents = new StringBuilder();
+        private final CompletableFuture<String> completion = new CompletableFuture<>();
+
+        @Override
+        public void onOpen(WebSocket webSocket) {
+            WebSocket.Listener.super.onOpen(webSocket);
+            webSocket.request(1);
+        }
+
+        @Override
+        public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
+            frameBuffer.append(data);
+            if (last) {
+                String message = frameBuffer.toString();
+                frameBuffer.setLength(0);
+                if (rawEvents.length() > 0) {
+                    rawEvents.append('\n');
+                }
+                rawEvents.append(message);
+                handleWsMessage(message);
+            }
+            webSocket.request(1);
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public void onError(WebSocket webSocket, Throwable error) {
+            if (!completion.isDone()) {
+                completion.completeExceptionally(error);
+            }
+        }
+
+        @Override
+        public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
+            if (!completion.isDone()) {
+                if (chunkBuffer.length() > 0) {
+                    completion.complete(chunkBuffer.toString());
+                } else {
+                    completion.completeExceptionally(new RuntimeException(
+                            "ws chat closed before response, status=" + statusCode + ", reason=" + reason));
+                }
+            }
+            return CompletableFuture.completedFuture(null);
+        }
+
+        private void handleWsMessage(String message) {
+            String type = extractJsonField(message, TYPE_FIELD_PATTERN).toLowerCase();
+            switch (type) {
+                case "chunk" -> chunkBuffer.append(extractJsonField(message, CONTENT_FIELD_PATTERN));
+                case "message", "done" -> {
+                    String response = extractJsonField(message, FULL_RESPONSE_FIELD_PATTERN);
+                    if (!StringUtils.hasText(response)) {
+                        response = extractJsonField(message, CONTENT_FIELD_PATTERN);
+                    }
+                    if (!StringUtils.hasText(response)) {
+                        response = chunkBuffer.toString();
+                    }
+                    if (!completion.isDone()) {
+                        completion.complete(response);
+                    }
+                }
+                case "error" -> {
+                    String error = extractJsonField(message, MESSAGE_FIELD_PATTERN);
+                    if (!StringUtils.hasText(error)) {
+                        error = "ws chat returned error event";
+                    }
+                    if (!completion.isDone()) {
+                        completion.completeExceptionally(new RuntimeException(error));
+                    }
+                }
+                default -> {
+                    // Ignore tool_call/tool_result/unknown events; wait for done/message.
+                }
+            }
+        }
+
+        String await(Duration timeout) throws TimeoutException {
+            try {
+                return completion.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+            } catch (TimeoutException ex) {
+                throw ex;
+            } catch (Exception ex) {
+                throw new RuntimeException(ex.getMessage(), ex);
+            }
+        }
+
+        String rawEvents() {
+            return rawEvents.toString();
+        }
     }
 
     private record InvocationResult(String responseText, String rawBody, String source) {
