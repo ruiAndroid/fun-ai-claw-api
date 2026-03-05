@@ -1,12 +1,14 @@
 package com.fun.ai.claw.api.controller;
 
 import com.fun.ai.claw.api.model.AcceptedActionResponse;
+import com.fun.ai.claw.api.model.AgentDescriptorResponse;
 import com.fun.ai.claw.api.model.CreateInstanceRequest;
 import com.fun.ai.claw.api.model.InstanceActionRequest;
 import com.fun.ai.claw.api.model.ListResponse;
 import com.fun.ai.claw.api.model.ClawInstanceDto;
 import com.fun.ai.claw.api.model.PairingCodeResponse;
 import com.fun.ai.claw.api.service.ControlService;
+import com.fun.ai.claw.api.service.InstanceAgentService;
 import com.fun.ai.claw.api.service.PairingCodeService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -27,10 +29,14 @@ public class InstanceController {
 
     private final ControlService controlService;
     private final PairingCodeService pairingCodeService;
+    private final InstanceAgentService instanceAgentService;
 
-    public InstanceController(ControlService controlService, PairingCodeService pairingCodeService) {
+    public InstanceController(ControlService controlService,
+                              PairingCodeService pairingCodeService,
+                              InstanceAgentService instanceAgentService) {
         this.controlService = controlService;
         this.pairingCodeService = pairingCodeService;
+        this.instanceAgentService = instanceAgentService;
     }
 
     @GetMapping
@@ -54,6 +60,11 @@ public class InstanceController {
     @GetMapping("/{instanceId}/pairing-code")
     public PairingCodeResponse getPairingCode(@PathVariable UUID instanceId) {
         return pairingCodeService.fetchPairingCode(instanceId);
+    }
+
+    @GetMapping("/{instanceId}/agents")
+    public ListResponse<AgentDescriptorResponse> listAgents(@PathVariable UUID instanceId) {
+        return new ListResponse<>(instanceAgentService.listAgents(instanceId));
     }
 
     @DeleteMapping("/{instanceId}")

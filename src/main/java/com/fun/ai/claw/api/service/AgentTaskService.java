@@ -44,7 +44,7 @@ public class AgentTaskService {
                             @Value("${app.gateway.url-template:http://127.0.0.1/fun-claw/ui-controller/{instanceId}}")
                             String gatewayUrlTemplate,
                             @Value("${app.agent-task.confirm-ttl-seconds:600}") int confirmTtlSeconds,
-                            @Value("${app.agent-task.dispatch-mode:plain}") String dispatchMode,
+                            @Value("${app.agent-task.dispatch-mode:force_delegate}") String dispatchMode,
                             @Value("${app.agent-task.webhook-timeout-seconds:90}") int webhookTimeoutSeconds) {
         this.instanceRepository = instanceRepository;
         this.repository = repository;
@@ -150,7 +150,7 @@ public class AgentTaskService {
                 规则：
                 1) 只调用一次 delegate 工具。
                 2) agent 必须是 "%s"。
-                3) 禁止递归委托。
+                3) 禁止递归委托（不能委托回自身）。
                 4) 返回子智能体结果，不要额外发挥。
                 任务内容：
                 %s
@@ -159,12 +159,12 @@ public class AgentTaskService {
 
     private String normalizeDispatchMode(String mode) {
         if (!StringUtils.hasText(mode)) {
-            return "plain";
+            return "force_delegate";
         }
         String normalized = mode.trim().toLowerCase();
         return switch (normalized) {
             case "force_delegate", "plain" -> normalized;
-            default -> "plain";
+            default -> "force_delegate";
         };
     }
 }

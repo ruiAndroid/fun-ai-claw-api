@@ -32,6 +32,11 @@ Schema is auto-initialized at startup via `src/main/resources/schema.sql`.
 - `POST /v1/instances`
 - `DELETE /v1/instances/{instanceId}`
 - `POST /v1/instances/{instanceId}/actions`
+- `GET /v1/instances/{instanceId}/pairing-code`
+- `GET /v1/instances/{instanceId}/agents`
+- `POST /v1/agent-tasks/prepare`
+- `POST /v1/agent-tasks/confirm`
+- `GET /v1/agent-tasks/tasks/{taskId}`
 
 ## Runtime Image Presets
 
