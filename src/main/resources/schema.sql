@@ -50,3 +50,46 @@ create table if not exists agent_task (
 create index if not exists idx_agent_task_status on agent_task (status);
 create index if not exists idx_agent_task_created_at on agent_task (created_at);
 create index if not exists idx_agent_task_expires_at on agent_task (expires_at);
+
+create table if not exists instance_agent_guidance (
+    instance_id uuid primary key references claw_instance (id) on delete cascade,
+    agents_md text not null,
+    enabled boolean not null default true,
+    updated_by varchar(128) null,
+    updated_at timestamptz not null
+);
+
+alter table instance_agent_guidance
+    add column if not exists agents_md text;
+
+alter table instance_agent_guidance
+    add column if not exists enabled boolean not null default true;
+
+update instance_agent_guidance
+set enabled = true
+where enabled is null;
+
+alter table instance_agent_guidance
+    alter column enabled set not null;
+
+alter table instance_agent_guidance
+    add column if not exists updated_by varchar(128) null;
+
+alter table instance_agent_guidance
+    add column if not exists updated_at timestamptz;
+
+update instance_agent_guidance
+set agents_md = ''
+where agents_md is null;
+
+alter table instance_agent_guidance
+    alter column agents_md set not null;
+
+update instance_agent_guidance
+set updated_at = now()
+where updated_at is null;
+
+alter table instance_agent_guidance
+    alter column updated_at set not null;
+
+create index if not exists idx_instance_agent_guidance_updated_at on instance_agent_guidance (updated_at);

@@ -58,6 +58,17 @@ app:
     prefer-api-chat: ${AGENT_TASK_PREFER_API_CHAT:true}
     allow-webhook-fallback: ${AGENT_TASK_ALLOW_WEBHOOK_FALLBACK:true}
     ws-chat-timeout-seconds: ${AGENT_TASK_WS_CHAT_TIMEOUT_SECONDS:120}
+  agent-guidance:
+    # Preferred global fallback source on API host (optional).
+    default-main-agents-md-path: /opt/fun-ai-claw/config/main-AGENTS.md
+    # Inline fallback when file path is absent/unreadable (optional).
+    default-main-agents-md: ""
+    # Whether runtime sync should overwrite existing AGENTS.md in instance workspace.
+    overwrite-on-start: true
+    # Path shown to frontend and used by plane runtime writer inside container.
+    instance-workspace-path: /zeroclaw-data/workspace/AGENTS.md
+    # Protect DB/API from oversized prompts.
+    max-bytes: 262144
   images:
     allow-custom-image: false
     presets:

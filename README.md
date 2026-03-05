@@ -34,6 +34,9 @@ Schema is auto-initialized at startup via `src/main/resources/schema.sql`.
 - `POST /v1/instances/{instanceId}/actions`
 - `GET /v1/instances/{instanceId}/pairing-code`
 - `GET /v1/instances/{instanceId}/agents`
+- `GET /v1/instances/{instanceId}/main-agent-guidance`
+- `PUT /v1/instances/{instanceId}/main-agent-guidance`
+- `DELETE /v1/instances/{instanceId}/main-agent-guidance`
 - `POST /v1/agent-tasks/prepare`
 - `POST /v1/agent-tasks/confirm`
 - `GET /v1/agent-tasks/tasks/{taskId}`
@@ -60,6 +63,13 @@ app:
 - API calls plane service for real execution. Configure:
   - `PLANE_BASE_URL` (default: `http://127.0.0.1:8090/internal/v1`)
   - `PLANE_REQUESTED_BY` (default: `fun-ai-claw-api`)
+- Instance main-agent guidance is stored in DB table `instance_agent_guidance`.
+- Runtime sync resolution priority on START/RESTART/ROLLBACK:
+  1. Instance override (`enabled=true`)
+  2. Global fallback file (`app.agent-guidance.default-main-agents-md-path`)
+  3. Global inline fallback (`app.agent-guidance.default-main-agents-md`)
+- If no effective prompt is resolved and `overwrite-on-start=true`, API sends an empty payload so runtime can clear stale workspace `AGENTS.md`.
+- Management API returns `workspacePath` so frontend can show the actual runtime file path.
 - Set `ZEROCLAW_PRESET_IMAGE` in deployment env to point to your own registry mirror.
 
 ## Update Script

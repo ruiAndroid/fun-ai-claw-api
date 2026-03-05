@@ -15,16 +15,21 @@ import java.util.UUID;
 
 @Component
 public class PlaneClient {
+    private static final String AGENTS_MD_CONTENT_PAYLOAD_KEY = "agentsMdContent";
+    private static final String AGENTS_MD_OVERWRITE_PAYLOAD_KEY = "agentsMdOverwrite";
 
     private final RestClient restClient;
     private final String planeBaseUrl;
     private final String requestedBy;
+    private final InstanceMainAgentGuidanceService instanceMainAgentGuidanceService;
 
     public PlaneClient(@Value("${app.plane.base-url:http://127.0.0.1:8090/internal/v1}") String planeBaseUrl,
-                       @Value("${app.plane.requested-by:fun-ai-claw-api}") String requestedBy) {
+                       @Value("${app.plane.requested-by:fun-ai-claw-api}") String requestedBy,
+                       InstanceMainAgentGuidanceService instanceMainAgentGuidanceService) {
         this.restClient = RestClient.create();
         this.planeBaseUrl = planeBaseUrl;
         this.requestedBy = requestedBy;
+        this.instanceMainAgentGuidanceService = instanceMainAgentGuidanceService;
     }
 
     public PlaneTaskExecutionRecord reconcileInstanceAction(UUID instanceId,
@@ -37,6 +42,17 @@ public class PlaneClient {
         }
         if (gatewayHostPort != null) {
             payload.put("gatewayHostPort", gatewayHostPort);
+        }
+        if (action == InstanceActionType.START || action == InstanceActionType.RESTART || action == InstanceActionType.ROLLBACK) {
+            InstanceMainAgentGuidanceService.RuntimeGuidance guidance =
+                    instanceMainAgentGuidanceService.resolveRuntimeGuidance(instanceId);
+            payload.put(AGENTS_MD_OVERWRITE_PAYLOAD_KEY, guidance.overwriteOnStart());
+            if (guidance.content() != null) {
+                payload.put(AGENTS_MD_CONTENT_PAYLOAD_KEY, guidance.content());
+            } else if (guidance.overwriteOnStart()) {
+                // Clear stale workspace AGENTS.md when there is no effective guidance.
+                payload.put(AGENTS_MD_CONTENT_PAYLOAD_KEY, "");
+            }
         }
 
         PlaneReconcileRequest request = new PlaneReconcileRequest(
