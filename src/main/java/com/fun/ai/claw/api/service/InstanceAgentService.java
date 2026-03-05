@@ -234,7 +234,10 @@ public class InstanceAgentService {
         instanceRepository.findById(instanceId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "instance not found"));
         String containerName = containerPrefix + "-" + instanceId;
-        String script = "cat > " + shellSingleQuote(targetConfigPath);
+        String tempConfigPath = targetConfigPath + ".funclaw.tmp";
+        String script = "/bin/busybox cat > " + shellSingleQuote(tempConfigPath)
+                + " && /bin/busybox cp " + shellSingleQuote(tempConfigPath) + " " + shellSingleQuote(targetConfigPath)
+                + " && /bin/busybox rm -f " + shellSingleQuote(tempConfigPath);
         CommandResult result = runCommandWithInput(
                 configText,
                 dockerCommand,
