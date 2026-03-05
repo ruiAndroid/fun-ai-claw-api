@@ -27,6 +27,8 @@ public class InstanceSkillService {
     private static final Pattern SKILLS_BLOCK_PATTERN = Pattern.compile(
             "(?ms)^\\s*\\[\\s*skills\\s*]\\s*(.*?)(?=^\\s*\\[[^\\]]+\\]|\\z)"
     );
+    private static final Pattern CONFIG_DIR_ARG_PATTERN = Pattern.compile("(?:^|\\s)--config-dir(?:=|\\s+)(\\S+)");
+    private static final Pattern ZEROCLAW_CONFIG_DIR_ENV_PATTERN = Pattern.compile("(?m)^ZEROCLAW_CONFIG_DIR=(.+)$");
     private static final Pattern OPEN_SKILLS_ENABLED_PATTERN = Pattern.compile(
             "(?m)^\\s*open_skills_enabled\\s*=\\s*(true|false)\\s*$",
             Pattern.CASE_INSENSITIVE
@@ -59,23 +61,12 @@ public class InstanceSkillService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "instance not found"));
 
         String containerName = containerPrefix + "-" + instanceId;
-        CommandResult configResult = runCommand(
-                dockerCommand,
-                "exec",
-                containerName,
-                "/bin/busybox",
-                "cat",
-                configPath
-        );
-        if (configResult.exitCode != 0) {
-            String details = StringUtils.hasText(configResult.output) ? ": " + configResult.output.trim() : "";
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "failed to read instance config" + details);
-        }
-        if (!StringUtils.hasText(configResult.output)) {
+        LoadedConfig loadedConfig = readConfig(containerName);
+        if (!StringUtils.hasText(loadedConfig.text())) {
             return List.of();
         }
 
-        SkillsConfig skillsConfig = parseSkillsConfig(configResult.output);
+        SkillsConfig skillsConfig = parseSkillsConfig(loadedConfig.text());
         if (!skillsConfig.openSkillsEnabled() || !StringUtils.hasText(skillsConfig.openSkillsDir())) {
             return List.of();
         }
@@ -104,6 +95,89 @@ public class InstanceSkillService {
         return skills.stream()
                 .sorted(Comparator.comparing(SkillDescriptorResponse::id))
                 .toList();
+    }
+
+    private LoadedConfig readConfig(String containerName) {
+        List<String> candidatePaths = resolveConfigPathCandidates(containerName);
+        CommandResult lastFailure = null;
+        for (String candidatePath : candidatePaths) {
+            CommandResult configResult = runCommand(
+                    dockerCommand,
+                    "exec",
+                    containerName,
+                    "/bin/busybox",
+                    "cat",
+                    candidatePath
+            );
+            if (configResult.exitCode == 0) {
+                return new LoadedConfig(candidatePath, configResult.output);
+            }
+            lastFailure = configResult;
+        }
+        String details = lastFailure != null && StringUtils.hasText(lastFailure.output)
+                ? ": " + lastFailure.output.trim()
+                : "";
+        throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "failed to read instance config" + details);
+    }
+
+    private List<String> resolveConfigPathCandidates(String containerName) {
+        List<String> candidates = new ArrayList<>();
+        String inspectedArgsPath = inspectContainerConfigPathFromArgs(containerName);
+        if (StringUtils.hasText(inspectedArgsPath)) {
+            candidates.add(inspectedArgsPath);
+        }
+        String inspectedEnvPath = inspectContainerConfigPathFromEnv(containerName);
+        if (StringUtils.hasText(inspectedEnvPath) && !candidates.contains(inspectedEnvPath)) {
+            candidates.add(inspectedEnvPath);
+        }
+        if (!candidates.contains(configPath)) {
+            candidates.add(configPath);
+        }
+        return candidates;
+    }
+
+    private String inspectContainerConfigPathFromArgs(String containerName) {
+        CommandResult inspect = runCommand(
+                dockerCommand,
+                "inspect",
+                "-f",
+                "{{range .Args}}{{.}} {{end}}",
+                containerName
+        );
+        if (inspect.exitCode != 0 || !StringUtils.hasText(inspect.output)) {
+            return null;
+        }
+        Matcher matcher = CONFIG_DIR_ARG_PATTERN.matcher(inspect.output);
+        if (!matcher.find()) {
+            return null;
+        }
+        String configDir = matcher.group(1) == null ? "" : matcher.group(1).trim();
+        if (!StringUtils.hasText(configDir)) {
+            return null;
+        }
+        return configDir.endsWith("/") ? configDir + "config.toml" : configDir + "/config.toml";
+    }
+
+    private String inspectContainerConfigPathFromEnv(String containerName) {
+        CommandResult inspect = runCommand(
+                dockerCommand,
+                "inspect",
+                "-f",
+                "{{range .Config.Env}}{{println .}}{{end}}",
+                containerName
+        );
+        if (inspect.exitCode != 0 || !StringUtils.hasText(inspect.output)) {
+            return null;
+        }
+        Matcher matcher = ZEROCLAW_CONFIG_DIR_ENV_PATTERN.matcher(inspect.output);
+        if (!matcher.find()) {
+            return null;
+        }
+        String configDir = matcher.group(1) == null ? "" : matcher.group(1).trim();
+        if (!StringUtils.hasText(configDir)) {
+            return null;
+        }
+        return configDir.endsWith("/") ? configDir + "config.toml" : configDir + "/config.toml";
     }
 
     private SkillsConfig parseSkillsConfig(String configText) {
@@ -213,6 +287,9 @@ public class InstanceSkillService {
     }
 
     private record SkillsConfig(boolean openSkillsEnabled, String openSkillsDir) {
+    }
+
+    private record LoadedConfig(String path, String text) {
     }
 
     private record CommandResult(int exitCode, String output) {

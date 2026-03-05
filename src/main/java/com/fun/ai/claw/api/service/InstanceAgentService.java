@@ -31,6 +31,7 @@ public class InstanceAgentService {
             "(?ms)^\\s*\\[\\s*agents\\s*\\.\\s*(?:\"((?:\\\\.|[^\"\\\\])*)\"|'((?:\\\\.|[^'\\\\])*)'|([A-Za-z0-9_-]+))\\s*\\]\\s*(.*?)(?=^\\s*\\[[^\\]]+\\]|\\z)"
     );
     private static final Pattern CONFIG_DIR_ARG_PATTERN = Pattern.compile("(?:^|\\s)--config-dir(?:=|\\s+)(\\S+)");
+    private static final Pattern ZEROCLAW_CONFIG_DIR_ENV_PATTERN = Pattern.compile("(?m)^ZEROCLAW_CONFIG_DIR=(.+)$");
     private static final Pattern PROVIDER_PATTERN = Pattern.compile("(?m)^\\s*provider\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
     private static final Pattern MODEL_PATTERN = Pattern.compile("(?m)^\\s*model\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
     private static final Pattern SYSTEM_PROMPT_PATTERN = Pattern.compile("(?m)^\\s*system_prompt\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
@@ -115,7 +116,7 @@ public class InstanceAgentService {
             if (agentBlock == null) {
                 continue;
             }
-            String updatedBlock = upsertSystemPromptInBlock(agentBlock.block(), escapedPrompt);
+            String updatedBlock = upsertSystemPromptInBlock(agentBlock.fullBlock(), escapedPrompt);
             String updatedConfig = loadedConfig.text().substring(0, agentBlock.start())
                     + updatedBlock
                     + loadedConfig.text().substring(agentBlock.end());
@@ -171,9 +172,13 @@ public class InstanceAgentService {
 
     private List<String> resolveConfigPathCandidates(String containerName) {
         List<String> candidates = new ArrayList<>();
-        String inspectedPath = inspectContainerConfigPath(containerName);
-        if (StringUtils.hasText(inspectedPath)) {
-            candidates.add(inspectedPath);
+        String inspectedArgsPath = inspectContainerConfigPathFromArgs(containerName);
+        if (StringUtils.hasText(inspectedArgsPath)) {
+            candidates.add(inspectedArgsPath);
+        }
+        String inspectedEnvPath = inspectContainerConfigPathFromEnv(containerName);
+        if (StringUtils.hasText(inspectedEnvPath) && !candidates.contains(inspectedEnvPath)) {
+            candidates.add(inspectedEnvPath);
         }
         if (!candidates.contains(configPath)) {
             candidates.add(configPath);
@@ -181,7 +186,7 @@ public class InstanceAgentService {
         return candidates;
     }
 
-    private String inspectContainerConfigPath(String containerName) {
+    private String inspectContainerConfigPathFromArgs(String containerName) {
         CommandResult inspect = runCommand(
                 dockerCommand,
                 "inspect",
@@ -193,6 +198,28 @@ public class InstanceAgentService {
             return null;
         }
         Matcher matcher = CONFIG_DIR_ARG_PATTERN.matcher(inspect.output());
+        if (!matcher.find()) {
+            return null;
+        }
+        String configDir = matcher.group(1) == null ? "" : matcher.group(1).trim();
+        if (!StringUtils.hasText(configDir)) {
+            return null;
+        }
+        return configDir.endsWith("/") ? configDir + "config.toml" : configDir + "/config.toml";
+    }
+
+    private String inspectContainerConfigPathFromEnv(String containerName) {
+        CommandResult inspect = runCommand(
+                dockerCommand,
+                "inspect",
+                "-f",
+                "{{range .Config.Env}}{{println .}}{{end}}",
+                containerName
+        );
+        if (inspect.exitCode != 0 || !StringUtils.hasText(inspect.output())) {
+            return null;
+        }
+        Matcher matcher = ZEROCLAW_CONFIG_DIR_ENV_PATTERN.matcher(inspect.output());
         if (!matcher.find()) {
             return null;
         }
