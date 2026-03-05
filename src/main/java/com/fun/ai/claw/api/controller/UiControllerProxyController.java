@@ -248,32 +248,30 @@ public class UiControllerProxyController {
     }
 
     private ResponseEntity<StreamingResponseBody> proxyEventStream(HttpServletRequest request, URI targetUri) {
-        HttpRequest outboundRequest = buildEventStreamRequest(request, targetUri);
-        HttpResponse<InputStream> upstreamResponse = sendEventStream(outboundRequest);
-        InputStream upstreamBody = upstreamResponse.body();
-
         HttpHeaders responseHeaders = new HttpHeaders();
-        upstreamResponse.headers().map().forEach((headerName, values) -> {
-            if (shouldSkipResponseHeader(headerName)) {
-                return;
-            }
-            if ("set-cookie".equalsIgnoreCase(headerName)) {
-                responseHeaders.put(headerName, rewriteSetCookiePaths(values));
-                return;
-            }
-            responseHeaders.put(headerName, new ArrayList<>(values));
-        });
-        if (!StringUtils.hasText(responseHeaders.getFirst(HttpHeaders.CONTENT_TYPE))) {
-            responseHeaders.set(HttpHeaders.CONTENT_TYPE, "text/event-stream;charset=UTF-8");
-        }
+        responseHeaders.set(HttpHeaders.CONTENT_TYPE, "text/event-stream;charset=UTF-8");
+        responseHeaders.set(HttpHeaders.CACHE_CONTROL, "no-cache");
+        responseHeaders.set("X-Accel-Buffering", "no");
 
         StreamingResponseBody stream = outputStream -> {
-            try (InputStream body = upstreamBody) {
-                body.transferTo(outputStream);
+            HttpRequest outboundRequest = buildEventStreamRequest(request, targetUri);
+            outputStream.write(": connected\n\n".getBytes(StandardCharsets.UTF_8));
+            outputStream.flush();
+            try {
+                HttpResponse<InputStream> upstreamResponse = sendEventStream(outboundRequest);
+                try (InputStream body = upstreamResponse.body()) {
+                    body.transferTo(outputStream);
+                }
+            } catch (ResponseStatusException ex) {
+                String message = ex.getReason() == null ? "event stream proxy error" : ex.getReason();
+                log.warn("ui proxy event-stream failed uri={} reason={}", targetUri, message);
+                String escaped = message.replace("\\", "\\\\").replace("\"", "\\\"");
+                String errorEvent = "event: error\ndata: {\"type\":\"error\",\"message\":\"" + escaped + "\"}\n\n";
+                outputStream.write(errorEvent.getBytes(StandardCharsets.UTF_8));
                 outputStream.flush();
             }
         };
-        return new ResponseEntity<>(stream, responseHeaders, HttpStatusCode.valueOf(upstreamResponse.statusCode()));
+        return new ResponseEntity<>(stream, responseHeaders, HttpStatus.OK);
     }
 
     private URI buildTargetUri(UUID instanceId, int targetPort, HttpServletRequest request) {
