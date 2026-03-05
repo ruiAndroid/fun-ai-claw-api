@@ -24,7 +24,7 @@ import java.util.regex.Pattern;
 public class InstanceAgentService {
 
     private static final Pattern AGENT_BLOCK_PATTERN = Pattern.compile(
-            "(?ms)^\\[agents\\.\"((?:\\\\.|[^\"\\\\])*)\"\\]\\s*(.*?)(?=^\\[[^\\]]+\\]|\\z)"
+            "(?ms)^\\s*\\[\\s*agents\\s*\\.\\s*(?:\"((?:\\\\.|[^\"\\\\])*)\"|'((?:\\\\.|[^'\\\\])*)'|([A-Za-z0-9_-]+))\\s*\\]\\s*(.*?)(?=^\\s*\\[[^\\]]+\\]|\\z)"
     );
     private static final Pattern PROVIDER_PATTERN = Pattern.compile("(?m)^\\s*provider\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
     private static final Pattern MODEL_PATTERN = Pattern.compile("(?m)^\\s*model\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
@@ -79,17 +79,34 @@ public class InstanceAgentService {
         List<AgentDescriptorResponse> agents = new ArrayList<>();
         Matcher blockMatcher = AGENT_BLOCK_PATTERN.matcher(configText);
         while (blockMatcher.find()) {
-            String id = unescapeTomlString(blockMatcher.group(1)).trim();
+            String rawId = firstNonBlank(
+                    blockMatcher.group(1),
+                    blockMatcher.group(2),
+                    blockMatcher.group(3)
+            );
+            String id = unescapeTomlString(rawId).trim();
             if (!StringUtils.hasText(id)) {
                 continue;
             }
-            String block = blockMatcher.group(2);
+            String block = blockMatcher.group(4);
             String provider = findStringValue(PROVIDER_PATTERN, block);
             String model = findStringValue(MODEL_PATTERN, block);
             Boolean agentic = findBooleanValue(AGENTIC_PATTERN, block);
             agents.add(new AgentDescriptorResponse(id, provider, model, agentic));
         }
         return agents;
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null || values.length == 0) {
+            return "";
+        }
+        for (String value : values) {
+            if (StringUtils.hasText(value)) {
+                return value;
+            }
+        }
+        return "";
     }
 
     private String findStringValue(Pattern pattern, String block) {
