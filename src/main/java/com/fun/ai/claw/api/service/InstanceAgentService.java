@@ -33,7 +33,12 @@ public class InstanceAgentService {
     private static final Pattern PROVIDER_PATTERN = Pattern.compile("(?m)^\\s*provider\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
     private static final Pattern MODEL_PATTERN = Pattern.compile("(?m)^\\s*model\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
     private static final Pattern SYSTEM_PROMPT_PATTERN = Pattern.compile("(?m)^\\s*system_prompt\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
-    private static final Pattern SYSTEM_PROMPT_LINE_PATTERN = Pattern.compile("(?m)^(\\s*)system_prompt\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
+    private static final Pattern SYSTEM_PROMPT_LITERAL_PATTERN = Pattern.compile("(?m)^\\s*system_prompt\\s*=\\s*'([^'\\r\\n]*)'\\s*$");
+    private static final Pattern SYSTEM_PROMPT_MULTILINE_BASIC_PATTERN = Pattern.compile("(?ms)^\\s*system_prompt\\s*=\\s*\"\"\"(.*?)\"\"\"\\s*$");
+    private static final Pattern SYSTEM_PROMPT_MULTILINE_LITERAL_PATTERN = Pattern.compile("(?ms)^\\s*system_prompt\\s*=\\s*'''(.*?)'''\\s*$");
+    private static final Pattern SYSTEM_PROMPT_ASSIGNMENT_PATTERN = Pattern.compile(
+            "(?ms)^(\\s*)system_prompt\\s*=\\s*(?:\"\"\".*?\"\"\"|'''[\\s\\S]*?'''|\"(?:\\\\.|[^\"\\\\])*\"|'[^'\\r\\n]*')\\s*$"
+    );
     private static final Pattern AGENTIC_PATTERN = Pattern.compile("(?m)^\\s*agentic\\s*=\\s*(true|false)\\s*$", Pattern.CASE_INSENSITIVE);
     private static final Pattern ALLOWED_TOOLS_PATTERN = Pattern.compile("(?ms)^\\s*allowed_tools\\s*=\\s*\\[(.*?)]\\s*$");
     private static final Pattern ARRAY_QUOTED_STRING_PATTERN = Pattern.compile("\"((?:\\\\.|[^\"\\\\])*)\"|'((?:\\\\.|[^'\\\\])*)'");
@@ -75,7 +80,7 @@ public class InstanceAgentService {
         return new AgentSystemPromptResponse(
                 instanceId,
                 normalizedAgentId,
-                findStringValue(SYSTEM_PROMPT_PATTERN, agentBlock.block()),
+                findSystemPromptValue(agentBlock.block()),
                 configPath
         );
     }
@@ -160,7 +165,7 @@ public class InstanceAgentService {
             String block = blockMatcher.group(4);
             String provider = findStringValue(PROVIDER_PATTERN, block);
             String model = findStringValue(MODEL_PATTERN, block);
-            String systemPrompt = findStringValue(SYSTEM_PROMPT_PATTERN, block);
+            String systemPrompt = findSystemPromptValue(block);
             Boolean agentic = findBooleanValue(AGENTIC_PATTERN, block);
             List<String> allowedTools = findStringArrayValue(ALLOWED_TOOLS_PATTERN, block);
             agents.add(new AgentDescriptorResponse(id, provider, model, agentic, allowedTools, systemPrompt, configPath));
@@ -195,7 +200,7 @@ public class InstanceAgentService {
     }
 
     private String upsertSystemPromptInBlock(String block, String escapedPrompt) {
-        Matcher matcher = SYSTEM_PROMPT_LINE_PATTERN.matcher(block);
+        Matcher matcher = SYSTEM_PROMPT_ASSIGNMENT_PATTERN.matcher(block);
         String replacementLine = "system_prompt = \"" + escapedPrompt + "\"";
         if (matcher.find()) {
             String indent = matcher.group(1) == null ? "" : matcher.group(1);
@@ -208,6 +213,44 @@ public class InstanceAgentService {
             return block + replacementLine + "\n";
         }
         return block + "\n" + replacementLine + "\n";
+    }
+
+    private String findSystemPromptValue(String block) {
+        String basicValue = findStringValue(SYSTEM_PROMPT_PATTERN, block);
+        if (basicValue != null) {
+            return basicValue;
+        }
+
+        Matcher literalMatcher = SYSTEM_PROMPT_LITERAL_PATTERN.matcher(block);
+        if (literalMatcher.find()) {
+            return literalMatcher.group(1);
+        }
+
+        Matcher multilineBasicMatcher = SYSTEM_PROMPT_MULTILINE_BASIC_PATTERN.matcher(block);
+        if (multilineBasicMatcher.find()) {
+            String raw = normalizeTomlMultilineBody(multilineBasicMatcher.group(1));
+            return unescapeTomlString(raw);
+        }
+
+        Matcher multilineLiteralMatcher = SYSTEM_PROMPT_MULTILINE_LITERAL_PATTERN.matcher(block);
+        if (multilineLiteralMatcher.find()) {
+            return normalizeTomlMultilineBody(multilineLiteralMatcher.group(1));
+        }
+
+        return null;
+    }
+
+    private String normalizeTomlMultilineBody(String value) {
+        if (value == null) {
+            return "";
+        }
+        if (value.startsWith("\r\n")) {
+            return value.substring(2);
+        }
+        if (value.startsWith("\n")) {
+            return value.substring(1);
+        }
+        return value;
     }
 
     private String firstNonBlank(String... values) {
