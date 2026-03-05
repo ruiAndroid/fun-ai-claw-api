@@ -10,7 +10,6 @@ import com.fun.ai.claw.api.model.ListResponse;
 import com.fun.ai.claw.api.model.ClawInstanceDto;
 import com.fun.ai.claw.api.model.PairingCodeResponse;
 import com.fun.ai.claw.api.model.SkillDescriptorResponse;
-import com.fun.ai.claw.api.model.UpsertAgentSystemPromptRequest;
 import com.fun.ai.claw.api.model.UpsertInstanceMainAgentGuidanceRequest;
 import com.fun.ai.claw.api.service.ControlService;
 import com.fun.ai.claw.api.service.InstanceAgentService;
@@ -85,13 +84,6 @@ public class InstanceController {
     public AgentSystemPromptResponse getAgentSystemPrompt(@PathVariable UUID instanceId,
                                                           @PathVariable String agentId) {
         return instanceAgentService.getAgentSystemPrompt(instanceId, agentId);
-    }
-
-    @PutMapping("/{instanceId}/agents/{agentId}/system-prompt")
-    public AgentSystemPromptResponse upsertAgentSystemPrompt(@PathVariable UUID instanceId,
-                                                             @PathVariable String agentId,
-                                                             @RequestBody UpsertAgentSystemPromptRequest request) {
-        return instanceAgentService.upsertAgentSystemPrompt(instanceId, agentId, request);
     }
 
     @GetMapping("/{instanceId}/skills")

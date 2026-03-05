@@ -2,7 +2,6 @@ package com.fun.ai.claw.api.service;
 
 import com.fun.ai.claw.api.model.AgentDescriptorResponse;
 import com.fun.ai.claw.api.model.AgentSystemPromptResponse;
-import com.fun.ai.claw.api.model.UpsertAgentSystemPromptRequest;
 import com.fun.ai.claw.api.repository.InstanceRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -12,13 +11,11 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
@@ -38,9 +35,6 @@ public class InstanceAgentService {
     private static final Pattern SYSTEM_PROMPT_LITERAL_PATTERN = Pattern.compile("(?m)^\\s*system_prompt\\s*=\\s*'([^'\\r\\n]*)'\\s*$");
     private static final Pattern SYSTEM_PROMPT_MULTILINE_BASIC_PATTERN = Pattern.compile("(?ms)^\\s*system_prompt\\s*=\\s*\"\"\"(.*?)\"\"\"\\s*$");
     private static final Pattern SYSTEM_PROMPT_MULTILINE_LITERAL_PATTERN = Pattern.compile("(?ms)^\\s*system_prompt\\s*=\\s*'''(.*?)'''\\s*$");
-    private static final Pattern SYSTEM_PROMPT_ASSIGNMENT_PATTERN = Pattern.compile(
-            "(?ms)^(\\s*)system_prompt\\s*=\\s*(?:\"\"\".*?\"\"\"|'''[\\s\\S]*?'''|\"(?:\\\\.|[^\"\\\\])*\"|'[^'\\r\\n]*')\\s*$"
-    );
     private static final Pattern AGENTIC_PATTERN = Pattern.compile("(?m)^\\s*agentic\\s*=\\s*(true|false)\\s*$", Pattern.CASE_INSENSITIVE);
     private static final Pattern ALLOWED_TOOLS_PATTERN = Pattern.compile("(?ms)^\\s*allowed_tools\\s*=\\s*\\[(.*?)]\\s*$");
     private static final Pattern ARRAY_QUOTED_STRING_PATTERN = Pattern.compile("\"((?:\\\\.|[^\"\\\\])*)\"|'((?:\\\\.|[^'\\\\])*)'");
@@ -99,42 +93,6 @@ public class InstanceAgentService {
                     findSystemPromptValue(agentBlock.block()),
                     loadedConfig.path()
             );
-        }
-        throw new ResponseStatusException(HttpStatus.NOT_FOUND, "agent not found");
-    }
-
-    public AgentSystemPromptResponse upsertAgentSystemPrompt(UUID instanceId,
-                                                             String agentId,
-                                                             UpsertAgentSystemPromptRequest request) {
-        String normalizedAgentId = normalizeAgentId(agentId);
-        String normalizedPrompt = request == null ? "" : Objects.toString(request.systemPrompt(), "");
-        String escapedPrompt = escapeTomlBasicString(normalizedPrompt);
-        ResponseStatusException lastWriteError = null;
-
-        for (LoadedConfig loadedConfig : readConfigs(instanceId)) {
-            AgentBlock agentBlock = findAgentBlockOrNull(loadedConfig.text(), normalizedAgentId);
-            if (agentBlock == null) {
-                continue;
-            }
-            String updatedBlock = upsertSystemPromptInBlock(agentBlock.fullBlock(), escapedPrompt);
-            String updatedConfig = loadedConfig.text().substring(0, agentBlock.start())
-                    + updatedBlock
-                    + loadedConfig.text().substring(agentBlock.end());
-            try {
-                writeConfigText(instanceId, loadedConfig.path(), updatedConfig);
-                return new AgentSystemPromptResponse(
-                        instanceId,
-                        normalizedAgentId,
-                        normalizedPrompt,
-                        loadedConfig.path()
-                );
-            } catch (ResponseStatusException ex) {
-                lastWriteError = ex;
-            }
-        }
-
-        if (lastWriteError != null) {
-            throw lastWriteError;
         }
         throw new ResponseStatusException(HttpStatus.NOT_FOUND, "agent not found");
     }
@@ -230,31 +188,6 @@ public class InstanceAgentService {
         return configDir.endsWith("/") ? configDir + "config.toml" : configDir + "/config.toml";
     }
 
-    private void writeConfigText(UUID instanceId, String targetConfigPath, String configText) {
-        instanceRepository.findById(instanceId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "instance not found"));
-        String containerName = containerPrefix + "-" + instanceId;
-        String tempConfigPath = targetConfigPath + ".funclaw.tmp";
-        String script = "/bin/busybox cat > " + shellSingleQuote(tempConfigPath)
-                + " && /bin/busybox cp " + shellSingleQuote(tempConfigPath) + " " + shellSingleQuote(targetConfigPath)
-                + " && /bin/busybox rm -f " + shellSingleQuote(tempConfigPath);
-        CommandResult result = runCommandWithInput(
-                configText,
-                dockerCommand,
-                "exec",
-                "-i",
-                containerName,
-                "/bin/busybox",
-                "sh",
-                "-lc",
-                script
-        );
-        if (result.exitCode != 0) {
-            String details = StringUtils.hasText(result.output()) ? ": " + result.output().trim() : "";
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "failed to write instance config" + details);
-        }
-    }
-
     private List<AgentDescriptorResponse> parseAgents(String configText, String resolvedConfigPath) {
         List<AgentDescriptorResponse> agents = new ArrayList<>();
         Matcher blockMatcher = AGENT_BLOCK_PATTERN.matcher(configText);
@@ -279,14 +212,6 @@ public class InstanceAgentService {
         return agents;
     }
 
-    private AgentBlock findAgentBlock(String configText, String targetAgentId) {
-        AgentBlock agentBlock = findAgentBlockOrNull(configText, targetAgentId);
-        if (agentBlock != null) {
-            return agentBlock;
-        }
-        throw new ResponseStatusException(HttpStatus.NOT_FOUND, "agent not found");
-    }
-
     private AgentBlock findAgentBlockOrNull(String configText, String targetAgentId) {
         Matcher blockMatcher = AGENT_BLOCK_PATTERN.matcher(configText);
         while (blockMatcher.find()) {
@@ -300,7 +225,7 @@ public class InstanceAgentService {
                 continue;
             }
             if (id.equals(targetAgentId)) {
-                return new AgentBlock(id, blockMatcher.start(), blockMatcher.end(), blockMatcher.group(0), blockMatcher.group(4));
+                return new AgentBlock(id, blockMatcher.start(), blockMatcher.end(), blockMatcher.group(4));
             }
         }
         return null;
@@ -311,22 +236,6 @@ public class InstanceAgentService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "agentId is required");
         }
         return agentId.trim();
-    }
-
-    private String upsertSystemPromptInBlock(String block, String escapedPrompt) {
-        Matcher matcher = SYSTEM_PROMPT_ASSIGNMENT_PATTERN.matcher(block);
-        String replacementLine = "system_prompt = \"" + escapedPrompt + "\"";
-        if (matcher.find()) {
-            String indent = matcher.group(1) == null ? "" : matcher.group(1);
-            return block.substring(0, matcher.start())
-                    + indent
-                    + replacementLine
-                    + block.substring(matcher.end());
-        }
-        if (block.endsWith("\n")) {
-            return block + replacementLine + "\n";
-        }
-        return block + "\n" + replacementLine + "\n";
     }
 
     private String findSystemPromptValue(String block) {
@@ -439,25 +348,6 @@ public class InstanceAgentService {
         return builder.toString();
     }
 
-    private String escapeTomlBasicString(String value) {
-        if (value == null) {
-            return "";
-        }
-        return value
-                .replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\r", "\\r")
-                .replace("\n", "\\n")
-                .replace("\t", "\\t");
-    }
-
-    private String shellSingleQuote(String value) {
-        if (value == null) {
-            return "''";
-        }
-        return "'" + value.replace("'", "'\"'\"'") + "'";
-    }
-
     private CommandResult runCommand(String... command) {
         ProcessBuilder builder = new ProcessBuilder(command);
         builder.redirectErrorStream(true);
@@ -479,33 +369,7 @@ public class InstanceAgentService {
         }
     }
 
-    private CommandResult runCommandWithInput(String input, String... command) {
-        ProcessBuilder builder = new ProcessBuilder(command);
-        builder.redirectErrorStream(true);
-        try {
-            Process process = builder.start();
-            try (OutputStream stdin = process.getOutputStream()) {
-                if (input != null) {
-                    stdin.write(input.getBytes(StandardCharsets.UTF_8));
-                }
-            }
-            ByteArrayOutputStream output = new ByteArrayOutputStream();
-            process.getInputStream().transferTo(output);
-            boolean finished = process.waitFor(commandTimeout.toSeconds(), TimeUnit.SECONDS);
-            if (!finished) {
-                process.destroyForcibly();
-                return new CommandResult(124, "command timed out");
-            }
-            return new CommandResult(process.exitValue(), output.toString(StandardCharsets.UTF_8));
-        } catch (IOException ex) {
-            return new CommandResult(1, "io error: " + ex.getMessage());
-        } catch (InterruptedException ex) {
-            Thread.currentThread().interrupt();
-            return new CommandResult(130, "interrupted");
-        }
-    }
-
-    private record AgentBlock(String id, int start, int end, String fullBlock, String block) {
+    private record AgentBlock(String id, int start, int end, String block) {
     }
 
     private record LoadedConfig(String path, String text) {
