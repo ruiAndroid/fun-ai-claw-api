@@ -5,6 +5,7 @@ import com.fun.ai.claw.api.model.AgentTaskPrepareRequest;
 import com.fun.ai.claw.api.model.AgentTaskPrepareResponse;
 import com.fun.ai.claw.api.model.AgentTaskResponse;
 import com.fun.ai.claw.api.model.ClawInstanceDto;
+import com.fun.ai.claw.api.model.PairingCodeResponse;
 import com.fun.ai.claw.api.repository.AgentTaskRepository;
 import com.fun.ai.claw.api.repository.InstanceRepository;
 import org.slf4j.Logger;
@@ -22,8 +23,11 @@ import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.net.URI;
+import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -42,6 +46,7 @@ import java.util.regex.Pattern;
 @Service
 public class AgentTaskService {
     private static final Logger log = LoggerFactory.getLogger(AgentTaskService.class);
+    private static final String WS_TOKEN_QUERY_PARAM = "token";
     private static final Pattern RESPONSE_FIELD_PATTERN =
             Pattern.compile("(?is)\"response\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
     private static final Pattern TYPE_FIELD_PATTERN =
@@ -64,6 +69,7 @@ public class AgentTaskService {
             Pattern.compile("(?is)\"message\"\\s*:\\s*\\{[\\s\\S]*?\"content\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
 
     private final InstanceRepository instanceRepository;
+    private final PairingCodeService pairingCodeService;
     private final AgentTaskRepository repository;
     private final TaskExecutor taskExecutor;
     private final RestClient restClient;
@@ -74,9 +80,11 @@ public class AgentTaskService {
     private final boolean preferWsChat;
     private final boolean preferApiChat;
     private final boolean allowWebhookFallback;
+    private final String authTokenQueryParam;
     private final int wsChatTimeoutSeconds;
 
     public AgentTaskService(InstanceRepository instanceRepository,
+                            PairingCodeService pairingCodeService,
                             AgentTaskRepository repository,
                             TaskExecutor taskExecutor,
                             @Value("${app.gateway.url-template:http://127.0.0.1/fun-claw/ui-controller/{instanceId}}")
@@ -86,9 +94,11 @@ public class AgentTaskService {
                             @Value("${app.agent-task.prefer-ws-chat:true}") boolean preferWsChat,
                             @Value("${app.agent-task.prefer-api-chat:true}") boolean preferApiChat,
                             @Value("${app.agent-task.allow-webhook-fallback:true}") boolean allowWebhookFallback,
+                            @Value("${app.pairing-code.auth-token-query-param:authToken}") String authTokenQueryParam,
                             @Value("${app.agent-task.ws-chat-timeout-seconds:120}") int wsChatTimeoutSeconds,
                             @Value("${app.agent-task.webhook-timeout-seconds:90}") int webhookTimeoutSeconds) {
         this.instanceRepository = instanceRepository;
+        this.pairingCodeService = pairingCodeService;
         this.repository = repository;
         this.taskExecutor = taskExecutor;
         this.gatewayUrlTemplate = gatewayUrlTemplate;
@@ -97,6 +107,7 @@ public class AgentTaskService {
         this.preferWsChat = preferWsChat;
         this.preferApiChat = preferApiChat;
         this.allowWebhookFallback = allowWebhookFallback;
+        this.authTokenQueryParam = StringUtils.hasText(authTokenQueryParam) ? authTokenQueryParam.trim() : "authToken";
         this.wsChatTimeoutSeconds = Math.max(wsChatTimeoutSeconds, 10);
 
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
@@ -186,10 +197,12 @@ public class AgentTaskService {
 
     private InvocationOutcome invokeGateway(AgentTaskRepository.TaskRow task) {
         List<String> attempts = new ArrayList<>();
+        String authToken = resolveGatewayAuthToken(task.instanceId());
+        attempts.add(StringUtils.hasText(authToken) ? "auth=present" : "auth=none");
 
         if (preferWsChat) {
             try {
-                InvocationResult result = invokeWsChat(task);
+                InvocationResult result = invokeWsChat(task, authToken);
                 attempts.add("ws_chat=ok");
                 return new InvocationOutcome(result, attemptsSummary(attempts));
             } catch (Exception ex) {
@@ -204,7 +217,7 @@ public class AgentTaskService {
 
         if (preferApiChat) {
             try {
-                InvocationResult result = invokeApiChat(task);
+                InvocationResult result = invokeApiChat(task, authToken);
                 attempts.add("api_chat=ok");
                 return new InvocationOutcome(result, attemptsSummary(attempts));
             } catch (RestClientResponseException ex) {
@@ -241,7 +254,7 @@ public class AgentTaskService {
 
         if (allowWebhookFallback) {
             try {
-                InvocationResult result = invokeWebhook(task);
+                InvocationResult result = invokeWebhook(task, authToken);
                 attempts.add("webhook=ok");
                 return new InvocationOutcome(result, attemptsSummary(attempts));
             } catch (Exception ex) {
@@ -256,14 +269,17 @@ public class AgentTaskService {
         );
     }
 
-    private InvocationResult invokeApiChat(AgentTaskRepository.TaskRow task) {
+    private InvocationResult invokeApiChat(AgentTaskRepository.TaskRow task, String authToken) {
         URI apiChatUri = URI.create(resolveApiChatUrl(task.instanceId()));
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("message", task.requestMessage());
 
-        String body = restClient.post()
+        RestClient.RequestBodySpec request = restClient.post()
                 .uri(apiChatUri)
-                .contentType(MediaType.APPLICATION_JSON)
+                .contentType(MediaType.APPLICATION_JSON);
+        request = applyOptionalBearerAuth(request, authToken);
+
+        String body = request
                 .body(payload)
                 .retrieve()
                 .body(String.class);
@@ -272,8 +288,10 @@ public class AgentTaskService {
         return new InvocationResult(response, body == null ? "" : body, "api_chat");
     }
 
-    private InvocationResult invokeWsChat(AgentTaskRepository.TaskRow task) {
-        URI wsChatUri = URI.create(resolveWsChatUrl(task.instanceId()));
+    private InvocationResult invokeWsChat(AgentTaskRepository.TaskRow task, String authToken) {
+        String wsChatUrl = resolveWsChatUrl(task.instanceId());
+        wsChatUrl = appendQueryParam(wsChatUrl, WS_TOKEN_QUERY_PARAM, authToken);
+        URI wsChatUri = URI.create(wsChatUrl);
         WsChatListener listener = new WsChatListener();
         WebSocket webSocket = wsHttpClient.newWebSocketBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
@@ -293,14 +311,17 @@ public class AgentTaskService {
         return new InvocationResult(response, listener.rawEvents(), "ws_chat");
     }
 
-    private InvocationResult invokeWebhook(AgentTaskRepository.TaskRow task) {
+    private InvocationResult invokeWebhook(AgentTaskRepository.TaskRow task, String authToken) {
         URI webhookUri = URI.create(resolveWebhookUrl(task.instanceId()));
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("message", task.requestMessage());
 
-        String body = restClient.post()
+        RestClient.RequestBodySpec request = restClient.post()
                 .uri(webhookUri)
-                .contentType(MediaType.APPLICATION_JSON)
+                .contentType(MediaType.APPLICATION_JSON);
+        request = applyOptionalBearerAuth(request, authToken);
+
+        String body = request
                 .body(payload)
                 .retrieve()
                 .body(String.class);
@@ -439,6 +460,75 @@ public class AgentTaskService {
             }
         }
         return "";
+    }
+
+    private RestClient.RequestBodySpec applyOptionalBearerAuth(RestClient.RequestBodySpec request, String authToken) {
+        if (!StringUtils.hasText(authToken)) {
+            return request;
+        }
+        return request.header("Authorization", "Bearer " + authToken.trim());
+    }
+
+    private String resolveGatewayAuthToken(UUID instanceId) {
+        try {
+            PairingCodeResponse pairingCode = pairingCodeService.fetchPairingCode(instanceId);
+            if (pairingCode == null || !StringUtils.hasText(pairingCode.pairingLink())) {
+                return null;
+            }
+            String pairingLink = pairingCode.pairingLink().trim();
+            String token = extractQueryParam(pairingLink, authTokenQueryParam);
+            if (!StringUtils.hasText(token)) {
+                token = extractQueryParam(pairingLink, WS_TOKEN_QUERY_PARAM);
+            }
+            return StringUtils.hasText(token) ? token.trim() : null;
+        } catch (Exception ex) {
+            log.warn("agent-task failed to resolve gateway auth token, instanceId={}, reason={}",
+                    instanceId, compactError(ex));
+            return null;
+        }
+    }
+
+    private String extractQueryParam(String url, String paramName) {
+        if (!StringUtils.hasText(url) || !StringUtils.hasText(paramName)) {
+            return null;
+        }
+        try {
+            URI uri = URI.create(url);
+            String query = uri.getRawQuery();
+            if (!StringUtils.hasText(query)) {
+                return null;
+            }
+            String expected = paramName.trim();
+            for (String pair : query.split("&")) {
+                if (!StringUtils.hasText(pair)) {
+                    continue;
+                }
+                int index = pair.indexOf('=');
+                String name = index >= 0 ? pair.substring(0, index) : pair;
+                String value = index >= 0 ? pair.substring(index + 1) : "";
+                String decodedName = URLDecoder.decode(name, StandardCharsets.UTF_8);
+                if (!expected.equals(decodedName)) {
+                    continue;
+                }
+                String decodedValue = URLDecoder.decode(value, StandardCharsets.UTF_8);
+                return StringUtils.hasText(decodedValue) ? decodedValue : null;
+            }
+            return null;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private String appendQueryParam(String baseUrl, String paramName, String paramValue) {
+        if (!StringUtils.hasText(baseUrl)
+                || !StringUtils.hasText(paramName)
+                || !StringUtils.hasText(paramValue)) {
+            return baseUrl;
+        }
+        String separator = baseUrl.contains("?") ? "&" : "?";
+        String encodedName = URLEncoder.encode(paramName, StandardCharsets.UTF_8);
+        String encodedValue = URLEncoder.encode(paramValue, StandardCharsets.UTF_8);
+        return baseUrl + separator + encodedName + "=" + encodedValue;
     }
 
     private boolean looksLikeRawToolCall(String text) {
