@@ -7,6 +7,8 @@ public record AgentDescriptorResponse(
         String provider,
         String model,
         Boolean agentic,
-        List<String> allowedTools
+        List<String> allowedTools,
+        String systemPrompt,
+        String configPath
 ) {
 }

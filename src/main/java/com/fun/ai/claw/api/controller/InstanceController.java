@@ -2,6 +2,7 @@ package com.fun.ai.claw.api.controller;
 
 import com.fun.ai.claw.api.model.AcceptedActionResponse;
 import com.fun.ai.claw.api.model.AgentDescriptorResponse;
+import com.fun.ai.claw.api.model.AgentSystemPromptResponse;
 import com.fun.ai.claw.api.model.CreateInstanceRequest;
 import com.fun.ai.claw.api.model.InstanceActionRequest;
 import com.fun.ai.claw.api.model.InstanceMainAgentGuidanceResponse;
@@ -9,6 +10,7 @@ import com.fun.ai.claw.api.model.ListResponse;
 import com.fun.ai.claw.api.model.ClawInstanceDto;
 import com.fun.ai.claw.api.model.PairingCodeResponse;
 import com.fun.ai.claw.api.model.SkillDescriptorResponse;
+import com.fun.ai.claw.api.model.UpsertAgentSystemPromptRequest;
 import com.fun.ai.claw.api.model.UpsertInstanceMainAgentGuidanceRequest;
 import com.fun.ai.claw.api.service.ControlService;
 import com.fun.ai.claw.api.service.InstanceAgentService;
@@ -77,6 +79,19 @@ public class InstanceController {
     @GetMapping("/{instanceId}/agents")
     public ListResponse<AgentDescriptorResponse> listAgents(@PathVariable UUID instanceId) {
         return new ListResponse<>(instanceAgentService.listAgents(instanceId));
+    }
+
+    @GetMapping("/{instanceId}/agents/{agentId}/system-prompt")
+    public AgentSystemPromptResponse getAgentSystemPrompt(@PathVariable UUID instanceId,
+                                                          @PathVariable String agentId) {
+        return instanceAgentService.getAgentSystemPrompt(instanceId, agentId);
+    }
+
+    @PutMapping("/{instanceId}/agents/{agentId}/system-prompt")
+    public AgentSystemPromptResponse upsertAgentSystemPrompt(@PathVariable UUID instanceId,
+                                                             @PathVariable String agentId,
+                                                             @RequestBody UpsertAgentSystemPromptRequest request) {
+        return instanceAgentService.upsertAgentSystemPrompt(instanceId, agentId, request);
     }
 
     @GetMapping("/{instanceId}/skills")
