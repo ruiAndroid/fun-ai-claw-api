@@ -30,6 +30,7 @@ public class InstanceAgentService {
     private static final Pattern AGENT_BLOCK_PATTERN = Pattern.compile(
             "(?ms)^\\s*\\[\\s*agents\\s*\\.\\s*(?:\"((?:\\\\.|[^\"\\\\])*)\"|'((?:\\\\.|[^'\\\\])*)'|([A-Za-z0-9_-]+))\\s*\\]\\s*(.*?)(?=^\\s*\\[[^\\]]+\\]|\\z)"
     );
+    private static final Pattern CONFIG_DIR_ARG_PATTERN = Pattern.compile("(?:^|\\s)--config-dir(?:=|\\s+)(\\S+)");
     private static final Pattern PROVIDER_PATTERN = Pattern.compile("(?m)^\\s*provider\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
     private static final Pattern MODEL_PATTERN = Pattern.compile("(?m)^\\s*model\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
     private static final Pattern SYSTEM_PROMPT_PATTERN = Pattern.compile("(?m)^\\s*system_prompt\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
@@ -63,25 +64,25 @@ public class InstanceAgentService {
     }
 
     public List<AgentDescriptorResponse> listAgents(UUID instanceId) {
-        String configText = readConfigText(instanceId);
-        if (!StringUtils.hasText(configText)) {
+        LoadedConfig loadedConfig = readConfig(instanceId);
+        if (!StringUtils.hasText(loadedConfig.text())) {
             return List.of();
         }
 
-        return parseAgents(configText).stream()
+        return parseAgents(loadedConfig.text(), loadedConfig.path()).stream()
                 .sorted(Comparator.comparing(AgentDescriptorResponse::id))
                 .toList();
     }
 
     public AgentSystemPromptResponse getAgentSystemPrompt(UUID instanceId, String agentId) {
         String normalizedAgentId = normalizeAgentId(agentId);
-        String configText = readConfigText(instanceId);
-        AgentBlock agentBlock = findAgentBlock(configText, normalizedAgentId);
+        LoadedConfig loadedConfig = readConfig(instanceId);
+        AgentBlock agentBlock = findAgentBlock(loadedConfig.text(), normalizedAgentId);
         return new AgentSystemPromptResponse(
                 instanceId,
                 normalizedAgentId,
                 findSystemPromptValue(agentBlock.block()),
-                configPath
+                loadedConfig.path()
         );
     }
 
@@ -89,49 +90,90 @@ public class InstanceAgentService {
                                                              String agentId,
                                                              UpsertAgentSystemPromptRequest request) {
         String normalizedAgentId = normalizeAgentId(agentId);
-        String configText = readConfigText(instanceId);
-        AgentBlock agentBlock = findAgentBlock(configText, normalizedAgentId);
+        LoadedConfig loadedConfig = readConfig(instanceId);
+        AgentBlock agentBlock = findAgentBlock(loadedConfig.text(), normalizedAgentId);
         String normalizedPrompt = request == null ? "" : Objects.toString(request.systemPrompt(), "");
         String escapedPrompt = escapeTomlBasicString(normalizedPrompt);
         String updatedBlock = upsertSystemPromptInBlock(agentBlock.block(), escapedPrompt);
 
-        String updatedConfig = configText.substring(0, agentBlock.start())
+        String updatedConfig = loadedConfig.text().substring(0, agentBlock.start())
                 + updatedBlock
-                + configText.substring(agentBlock.end());
-        writeConfigText(instanceId, updatedConfig);
+                + loadedConfig.text().substring(agentBlock.end());
+        writeConfigText(instanceId, loadedConfig.path(), updatedConfig);
 
         return new AgentSystemPromptResponse(
                 instanceId,
                 normalizedAgentId,
                 normalizedPrompt,
-                configPath
+                loadedConfig.path()
         );
     }
 
-    private String readConfigText(UUID instanceId) {
+    private LoadedConfig readConfig(UUID instanceId) {
         instanceRepository.findById(instanceId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "instance not found"));
         String containerName = containerPrefix + "-" + instanceId;
-        CommandResult result = runCommand(
-                dockerCommand,
-                "exec",
-                containerName,
-                "/bin/busybox",
-                "cat",
-                configPath
-        );
-        if (result.exitCode != 0) {
-            String details = StringUtils.hasText(result.output()) ? ": " + result.output().trim() : "";
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "failed to read instance config" + details);
+        List<String> candidatePaths = resolveConfigPathCandidates(containerName);
+        CommandResult lastFailure = null;
+        for (String candidatePath : candidatePaths) {
+            CommandResult result = runCommand(
+                    dockerCommand,
+                    "exec",
+                    containerName,
+                    "/bin/busybox",
+                    "cat",
+                    candidatePath
+            );
+            if (result.exitCode == 0) {
+                return new LoadedConfig(candidatePath, result.output());
+            }
+            lastFailure = result;
         }
-        return result.output();
+        String details = lastFailure != null && StringUtils.hasText(lastFailure.output())
+                ? ": " + lastFailure.output().trim()
+                : "";
+        throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "failed to read instance config" + details);
     }
 
-    private void writeConfigText(UUID instanceId, String configText) {
+    private List<String> resolveConfigPathCandidates(String containerName) {
+        List<String> candidates = new ArrayList<>();
+        String inspectedPath = inspectContainerConfigPath(containerName);
+        if (StringUtils.hasText(inspectedPath)) {
+            candidates.add(inspectedPath);
+        }
+        if (!candidates.contains(configPath)) {
+            candidates.add(configPath);
+        }
+        return candidates;
+    }
+
+    private String inspectContainerConfigPath(String containerName) {
+        CommandResult inspect = runCommand(
+                dockerCommand,
+                "inspect",
+                "-f",
+                "{{range .Args}}{{.}} {{end}}",
+                containerName
+        );
+        if (inspect.exitCode != 0 || !StringUtils.hasText(inspect.output())) {
+            return null;
+        }
+        Matcher matcher = CONFIG_DIR_ARG_PATTERN.matcher(inspect.output());
+        if (!matcher.find()) {
+            return null;
+        }
+        String configDir = matcher.group(1) == null ? "" : matcher.group(1).trim();
+        if (!StringUtils.hasText(configDir)) {
+            return null;
+        }
+        return configDir.endsWith("/") ? configDir + "config.toml" : configDir + "/config.toml";
+    }
+
+    private void writeConfigText(UUID instanceId, String targetConfigPath, String configText) {
         instanceRepository.findById(instanceId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "instance not found"));
         String containerName = containerPrefix + "-" + instanceId;
-        String script = "cat > " + shellSingleQuote(configPath);
+        String script = "cat > " + shellSingleQuote(targetConfigPath);
         CommandResult result = runCommandWithInput(
                 configText,
                 dockerCommand,
@@ -149,7 +191,7 @@ public class InstanceAgentService {
         }
     }
 
-    private List<AgentDescriptorResponse> parseAgents(String configText) {
+    private List<AgentDescriptorResponse> parseAgents(String configText, String resolvedConfigPath) {
         List<AgentDescriptorResponse> agents = new ArrayList<>();
         Matcher blockMatcher = AGENT_BLOCK_PATTERN.matcher(configText);
         while (blockMatcher.find()) {
@@ -168,7 +210,7 @@ public class InstanceAgentService {
             String systemPrompt = findSystemPromptValue(block);
             Boolean agentic = findBooleanValue(AGENTIC_PATTERN, block);
             List<String> allowedTools = findStringArrayValue(ALLOWED_TOOLS_PATTERN, block);
-            agents.add(new AgentDescriptorResponse(id, provider, model, agentic, allowedTools, systemPrompt, configPath));
+            agents.add(new AgentDescriptorResponse(id, provider, model, agentic, allowedTools, systemPrompt, resolvedConfigPath));
         }
         return agents;
     }
@@ -392,6 +434,9 @@ public class InstanceAgentService {
     }
 
     private record AgentBlock(String id, int start, int end, String block) {
+    }
+
+    private record LoadedConfig(String path, String text) {
     }
 
     private record CommandResult(int exitCode, String output) {
