@@ -4,7 +4,6 @@ public enum InstanceActionType {
     START,
     STOP,
     RESTART,
-    RESTART_CLAW,
     ROLLBACK
 }
 

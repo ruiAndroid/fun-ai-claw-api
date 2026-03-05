@@ -158,10 +158,9 @@ public class ControlService {
     @Transactional(noRollbackFor = ResponseStatusException.class)
     public AcceptedActionResponse submitInstanceAction(UUID instanceId, InstanceActionRequest request) {
         ClawInstanceDto instance = getInstance(instanceId);
-        validateActionAllowed(instance, request.action());
         Instant now = Instant.now();
 
-        InstanceDesiredState desiredState = desiredStateForAction(request.action(), instance.desiredState());
+        InstanceDesiredState desiredState = desiredStateForAction(request.action());
         PlaneClient.PlaneTaskExecutionRecord execution;
         try {
             execution = executeActionWithGatewayPortRetry(
@@ -173,7 +172,7 @@ public class ControlService {
                     now
             ).execution();
         } catch (ResponseStatusException ex) {
-            instanceRepository.updateState(instance.id(), failureStatusForAction(request.action(), instance.status()), desiredState, now);
+            instanceRepository.updateState(instance.id(), InstanceStatus.ERROR, desiredState, now);
             instanceRepository.insertAction(
                     instance.id(),
                     request.action(),
@@ -184,7 +183,7 @@ public class ControlService {
         }
         InstanceStatus status = execution.succeeded()
                 ? statusForSuccessfulAction(request.action())
-                : failureStatusForAction(request.action(), instance.status());
+                : InstanceStatus.ERROR;
 
         instanceRepository.updateState(instance.id(), status, desiredState, now);
         UUID actionTaskId = instanceRepository.insertAction(
@@ -254,31 +253,17 @@ public class ControlService {
                 && StringUtils.hasText(preset.getImage());
     }
 
-    private void validateActionAllowed(ClawInstanceDto instance, InstanceActionType action) {
-        if (action == InstanceActionType.RESTART_CLAW && instance.status() != InstanceStatus.RUNNING) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "restart claw requires instance status RUNNING");
-        }
-    }
-
-    private InstanceDesiredState desiredStateForAction(InstanceActionType action, InstanceDesiredState currentDesiredState) {
+    private InstanceDesiredState desiredStateForAction(InstanceActionType action) {
         return switch (action) {
             case STOP -> InstanceDesiredState.STOPPED;
             case START, RESTART, ROLLBACK -> InstanceDesiredState.RUNNING;
-            case RESTART_CLAW -> currentDesiredState;
         };
     }
 
     private InstanceStatus statusForSuccessfulAction(InstanceActionType action) {
         return switch (action) {
             case STOP -> InstanceStatus.STOPPED;
-            case START, RESTART, ROLLBACK, RESTART_CLAW -> InstanceStatus.RUNNING;
-        };
-    }
-
-    private InstanceStatus failureStatusForAction(InstanceActionType action, InstanceStatus currentStatus) {
-        return switch (action) {
-            case RESTART_CLAW -> currentStatus;
-            default -> InstanceStatus.ERROR;
+            case START, RESTART, ROLLBACK -> InstanceStatus.RUNNING;
         };
     }
 
