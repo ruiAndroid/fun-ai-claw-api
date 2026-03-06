@@ -206,16 +206,6 @@ public class UiControllerProxyController {
 
         URI targetUri = buildTargetUri(instanceId, gatewayHostPort, request);
         byte[] normalizedRequestBody = rewriteConfigSavePayloadIfNeeded(instanceId, request, requestBody, targetUri);
-        byte[] configSaveBytes = extractConfigSaveBytes(request, targetUri, normalizedRequestBody);
-        if (shouldHandleConfigSaveDirectly(request, targetUri, configSaveBytes)) {
-            log.info("ui proxy handle /api/config save directly for instanceId={}, uri={}", instanceId, targetUri);
-            if (saveConfigFileToContainer(instanceId, configSaveBytes)) {
-                return buildConfigSaveSuccessResponse("ui-proxy-direct");
-            }
-            log.warn("ui proxy direct /api/config save failed for instanceId={}, uri={}, fallback to upstream",
-                    instanceId,
-                    targetUri);
-        }
         HttpRequest outboundRequest = buildOutboundRequest(request, normalizedRequestBody, targetUri);
         HttpResponse<byte[]> upstreamResponse = send(outboundRequest);
         if (isConfigEndpoint(targetUri.getPath()) && upstreamResponse.statusCode() >= 500) {
@@ -244,10 +234,13 @@ public class UiControllerProxyController {
                 }
             }
         }
-        if (shouldApplyDirectConfigSaveFallback(request, targetUri, configSaveBytes, upstreamResponse)) {
+        if (shouldApplyDirectConfigSaveFallback(request, targetUri, normalizedRequestBody, upstreamResponse)) {
             log.warn("ui proxy trigger config-save fallback for instanceId={}, uri={}", instanceId, targetUri);
-            if (saveConfigFileToContainer(instanceId, configSaveBytes)) {
-                return buildConfigSaveSuccessResponse("ui-proxy-fallback");
+            if (saveConfigFileToContainer(instanceId, normalizedRequestBody)) {
+                HttpHeaders fallbackHeaders = new HttpHeaders();
+                fallbackHeaders.set(HttpHeaders.CONTENT_TYPE, "application/json");
+                byte[] body = "{\"saved\":true,\"source\":\"ui-proxy-fallback\"}".getBytes(StandardCharsets.UTF_8);
+                return new ResponseEntity<>(body, fallbackHeaders, HttpStatusCode.valueOf(200));
             }
             log.warn("ui proxy fallback execution failed for instanceId={}, uri={}", instanceId, targetUri);
         }
@@ -455,47 +448,6 @@ public class UiControllerProxyController {
         return errorText.contains("config path must have a parent directory");
     }
 
-    private boolean shouldHandleConfigSaveDirectly(HttpServletRequest inboundRequest,
-                                                   URI targetUri,
-                                                   byte[] configBytes) {
-        if (targetUri == null || !isConfigEndpoint(targetUri.getPath())) {
-            return false;
-        }
-        if (configBytes == null || configBytes.length == 0) {
-            return false;
-        }
-        String method = inboundRequest.getMethod();
-        return "PUT".equalsIgnoreCase(method)
-                || "POST".equalsIgnoreCase(method)
-                || "PATCH".equalsIgnoreCase(method);
-    }
-
-    private byte[] extractConfigSaveBytes(HttpServletRequest inboundRequest,
-                                          URI targetUri,
-                                          byte[] requestBody) {
-        if (requestBody == null || requestBody.length == 0 || targetUri == null || !isConfigEndpoint(targetUri.getPath())) {
-            return requestBody;
-        }
-
-        String contentType = inboundRequest.getContentType();
-        if (!StringUtils.hasText(contentType)) {
-            return requestBody;
-        }
-
-        String normalizedContentType = contentType.toLowerCase(Locale.ROOT);
-        if (!normalizedContentType.contains("json")) {
-            return requestBody;
-        }
-
-        String rawJson = new String(requestBody, StandardCharsets.UTF_8);
-        String configText = extractConfigContentFromJson(rawJson);
-        if (configText == null) {
-            log.warn("ui proxy config save JSON payload did not contain textual config content");
-            return requestBody;
-        }
-        return configText.getBytes(StandardCharsets.UTF_8);
-    }
-
     private boolean saveConfigFileToContainer(UUID instanceId, byte[] configBytes) {
         if (!StringUtils.hasText(configSaveFallbackPath) || !StringUtils.hasText(containerPrefix)) {
             return false;
@@ -523,17 +475,15 @@ public class UiControllerProxyController {
             return false;
         }
 
-        String shellPath = quoteForSingleQuotedShell(path);
-        String writeCommand = "cat > '" + shellPath + "' && chmod 600 '" + shellPath + "'";
         CommandResult writeResult = runProcess(List.of(
                 dockerCommand,
                 "exec",
                 "-i",
                 containerName,
                 "/bin/busybox",
-                "sh",
-                "-lc",
-                writeCommand
+                "dd",
+                "of=" + path,
+                "conv=fsync"
         ), configBytes);
         if (writeResult.exitCode != 0) {
             log.warn("ui proxy fallback write failed for {}: {}", containerName, writeResult.output);
@@ -541,92 +491,6 @@ public class UiControllerProxyController {
         }
         log.info("ui proxy fallback saved config directly to container {} at {}", containerName, path);
         return true;
-    }
-
-    private ResponseEntity<byte[]> buildConfigSaveSuccessResponse(String source) {
-        HttpHeaders headers = new HttpHeaders();
-        headers.set(HttpHeaders.CONTENT_TYPE, "application/json");
-        byte[] body = ("{\"saved\":true,\"source\":\"" + source + "\"}")
-                .getBytes(StandardCharsets.UTF_8);
-        return new ResponseEntity<>(body, headers, HttpStatus.OK);
-    }
-
-    private String extractConfigContentFromJson(String rawJson) {
-        if (!StringUtils.hasText(rawJson)) {
-            return null;
-        }
-        for (String fieldName : List.of("content", "config", "toml", "text", "value")) {
-            String value = extractJsonStringField(rawJson, fieldName);
-            if (value != null) {
-                return value;
-            }
-        }
-        return null;
-    }
-
-    private String extractJsonStringField(String rawJson, String fieldName) {
-        Pattern pattern = Pattern.compile("(?is)\"" + Pattern.quote(fieldName) + "\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
-        Matcher matcher = pattern.matcher(rawJson);
-        if (!matcher.find()) {
-            return null;
-        }
-        return decodeJsonStringLiteral(matcher.group(1));
-    }
-
-    private String decodeJsonStringLiteral(String encoded) {
-        StringBuilder decoded = new StringBuilder(encoded.length());
-        for (int i = 0; i < encoded.length(); i++) {
-            char current = encoded.charAt(i);
-            if (current != '\\' || i + 1 >= encoded.length()) {
-                decoded.append(current);
-                continue;
-            }
-            char escaped = encoded.charAt(++i);
-            switch (escaped) {
-                case '"':
-                case '\\':
-                case '/':
-                    decoded.append(escaped);
-                    break;
-                case 'b':
-                    decoded.append('\b');
-                    break;
-                case 'f':
-                    decoded.append('\f');
-                    break;
-                case 'n':
-                    decoded.append('\n');
-                    break;
-                case 'r':
-                    decoded.append('\r');
-                    break;
-                case 't':
-                    decoded.append('\t');
-                    break;
-                case 'u':
-                    if (i + 4 >= encoded.length()) {
-                        decoded.append("\\u");
-                        break;
-                    }
-                    String hex = encoded.substring(i + 1, i + 5);
-                    try {
-                        decoded.append((char) Integer.parseInt(hex, 16));
-                        i += 4;
-                    } catch (NumberFormatException ex) {
-                        decoded.append("\\u").append(hex);
-                        i += 4;
-                    }
-                    break;
-                default:
-                    decoded.append(escaped);
-                    break;
-            }
-        }
-        return decoded.toString();
-    }
-
-    private String quoteForSingleQuotedShell(String value) {
-        return value.replace("'", "'\"'\"'");
     }
 
     private CommandResult runProcess(List<String> command, byte[] stdinBytes) {
