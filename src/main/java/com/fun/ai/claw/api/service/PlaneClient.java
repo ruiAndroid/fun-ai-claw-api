@@ -6,6 +6,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -80,6 +81,12 @@ public class PlaneClient {
                     HttpStatus.BAD_GATEWAY,
                     "plane call failed: HTTP " + ex.getStatusCode().value() + (StringUtils.hasText(details) ? " " + details : "")
             );
+        } catch (ResourceAccessException ex) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_GATEWAY,
+                    "plane service unavailable: " + planeBaseUrl + "/reconcile"
+                            + (StringUtils.hasText(ex.getMessage()) ? " (" + ex.getMessage() + ")" : "")
+            );
         }
     }
 
@@ -94,6 +101,12 @@ public class PlaneClient {
             throw new ResponseStatusException(
                     HttpStatus.BAD_GATEWAY,
                     "plane delete failed: HTTP " + ex.getStatusCode().value() + (StringUtils.hasText(details) ? " " + details : "")
+            );
+        } catch (ResourceAccessException ex) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_GATEWAY,
+                    "plane service unavailable: " + planeBaseUrl + "/instances/" + instanceId
+                            + (StringUtils.hasText(ex.getMessage()) ? " (" + ex.getMessage() + ")" : "")
             );
         }
     }
