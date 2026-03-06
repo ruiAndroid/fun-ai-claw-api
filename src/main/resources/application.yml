@@ -70,7 +70,7 @@ app:
     process-shutdown-timeout-seconds: ${TERMINAL_PROCESS_SHUTDOWN_TIMEOUT_SECONDS:2}
   agent-guidance:
     # Preferred global fallback source on API host (optional).
-    default-main-agents-md-path: /opt/fun-ai-claw/config/main-AGENTS.md
+    default-main-agents-md-path: /opt/fun-ai-claw-api/config/main-AGENTS.md
     # Inline fallback when file path is absent/unreadable (optional).
     default-main-agents-md: ""
     # Whether runtime sync should overwrite existing AGENTS.md in instance workspace.
