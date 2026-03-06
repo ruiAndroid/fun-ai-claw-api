@@ -1,7 +1,5 @@
 package com.fun.ai.claw.api.controller;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fun.ai.claw.api.model.ClawInstanceDto;
 import com.fun.ai.claw.api.repository.InstanceRepository;
 import jakarta.servlet.http.HttpServletRequest;
@@ -45,7 +43,6 @@ import java.util.regex.Pattern;
 @RestController
 public class UiControllerProxyController {
     private static final Logger log = LoggerFactory.getLogger(UiControllerProxyController.class);
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final String ZEROCLAW_DEFAULT_CONFIG_PATH = "/data/zeroclaw/config.toml";
     private static final Pattern CONFIG_PATH_PATTERN = Pattern.compile("(?i)\"config_path\"\\s*:\\s*\"[^\"]*\"");
     private static final Pattern CONFIG_PATH_CAMEL_PATTERN = Pattern.compile("(?i)\"configPath\"\\s*:\\s*\"[^\"]*\"");
@@ -490,31 +487,13 @@ public class UiControllerProxyController {
             return requestBody;
         }
 
-        try {
-            JsonNode root = OBJECT_MAPPER.readTree(requestBody);
-            JsonNode contentNode = firstTextNode(root, "content", "config", "toml", "text", "value");
-            if (contentNode == null || !contentNode.isTextual()) {
-                log.warn("ui proxy config save JSON payload did not contain textual config content");
-                return requestBody;
-            }
-            return contentNode.asText().getBytes(StandardCharsets.UTF_8);
-        } catch (IOException ex) {
-            log.warn("ui proxy failed to parse config save JSON payload: {}", ex.getMessage());
+        String rawJson = new String(requestBody, StandardCharsets.UTF_8);
+        String configText = extractConfigContentFromJson(rawJson);
+        if (configText == null) {
+            log.warn("ui proxy config save JSON payload did not contain textual config content");
             return requestBody;
         }
-    }
-
-    private JsonNode firstTextNode(JsonNode root, String... fieldNames) {
-        if (root == null || !root.isObject()) {
-            return null;
-        }
-        for (String fieldName : fieldNames) {
-            JsonNode candidate = root.get(fieldName);
-            if (candidate != null && candidate.isTextual()) {
-                return candidate;
-            }
-        }
-        return null;
+        return configText.getBytes(StandardCharsets.UTF_8);
     }
 
     private boolean saveConfigFileToContainer(UUID instanceId, byte[] configBytes) {
@@ -580,6 +559,80 @@ public class UiControllerProxyController {
         byte[] body = ("{\"saved\":true,\"source\":\"" + source + "\"}")
                 .getBytes(StandardCharsets.UTF_8);
         return new ResponseEntity<>(body, headers, HttpStatus.OK);
+    }
+
+    private String extractConfigContentFromJson(String rawJson) {
+        if (!StringUtils.hasText(rawJson)) {
+            return null;
+        }
+        for (String fieldName : List.of("content", "config", "toml", "text", "value")) {
+            String value = extractJsonStringField(rawJson, fieldName);
+            if (value != null) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private String extractJsonStringField(String rawJson, String fieldName) {
+        Pattern pattern = Pattern.compile("(?is)\"" + Pattern.quote(fieldName) + "\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
+        Matcher matcher = pattern.matcher(rawJson);
+        if (!matcher.find()) {
+            return null;
+        }
+        return decodeJsonStringLiteral(matcher.group(1));
+    }
+
+    private String decodeJsonStringLiteral(String encoded) {
+        StringBuilder decoded = new StringBuilder(encoded.length());
+        for (int i = 0; i < encoded.length(); i++) {
+            char current = encoded.charAt(i);
+            if (current != '\\' || i + 1 >= encoded.length()) {
+                decoded.append(current);
+                continue;
+            }
+            char escaped = encoded.charAt(++i);
+            switch (escaped) {
+                case '"':
+                case '\\':
+                case '/':
+                    decoded.append(escaped);
+                    break;
+                case 'b':
+                    decoded.append('\b');
+                    break;
+                case 'f':
+                    decoded.append('\f');
+                    break;
+                case 'n':
+                    decoded.append('\n');
+                    break;
+                case 'r':
+                    decoded.append('\r');
+                    break;
+                case 't':
+                    decoded.append('\t');
+                    break;
+                case 'u':
+                    if (i + 4 >= encoded.length()) {
+                        decoded.append("\\u");
+                        break;
+                    }
+                    String hex = encoded.substring(i + 1, i + 5);
+                    try {
+                        decoded.append((char) Integer.parseInt(hex, 16));
+                        i += 4;
+                    } catch (NumberFormatException ex) {
+                        decoded.append("\\u").append(hex);
+                        i += 4;
+                    }
+                    break;
+                default:
+                    decoded.append(escaped);
+                    break;
+            }
+        }
+        return decoded.toString();
     }
 
     private CommandResult runProcess(List<String> command, byte[] stdinBytes) {
