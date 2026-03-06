@@ -29,7 +29,7 @@ public class InstanceAgentGuidanceRepository {
     public Optional<Row> findByInstanceId(UUID instanceId) {
         List<Row> rows = jdbcTemplate.query("""
                         select instance_id, agents_md, enabled, updated_by, updated_at
-                        from instance_agent_guidance
+                        from instance_main_prompt
                         where instance_id = ?
                         """,
                 rowMapper,
@@ -44,7 +44,7 @@ public class InstanceAgentGuidanceRepository {
                        String updatedBy,
                        Instant updatedAt) {
         jdbcTemplate.update("""
-                        insert into instance_agent_guidance (instance_id, agents_md, enabled, updated_by, updated_at)
+                        insert into instance_main_prompt (instance_id, agents_md, enabled, updated_by, updated_at)
                         values (?, ?, ?, ?, ?)
                         on conflict (instance_id)
                         do update set
@@ -63,7 +63,7 @@ public class InstanceAgentGuidanceRepository {
 
     public int deleteByInstanceId(UUID instanceId) {
         return jdbcTemplate.update("""
-                        delete from instance_agent_guidance
+                        delete from instance_main_prompt
                         where instance_id = ?
                         """,
                 instanceId

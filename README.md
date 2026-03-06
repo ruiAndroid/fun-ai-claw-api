@@ -60,7 +60,7 @@ app:
 - API calls plane service for real execution. Configure:
   - `PLANE_BASE_URL` (default: `http://127.0.0.1:8090/internal/v1`)
   - `PLANE_REQUESTED_BY` (default: `fun-ai-claw-api`)
-- Instance main-agent guidance is stored in DB table `instance_agent_guidance`.
+- Instance main-agent guidance is stored in DB table `instance_main_prompt`.
 - Runtime sync resolution priority on START/RESTART/ROLLBACK:
   1. Instance override (`enabled=true`)
   2. Global fallback file (`app.agent-guidance.default-main-agents-md-path`)

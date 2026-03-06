@@ -31,7 +31,21 @@ create table if not exists instance_action (
 create index if not exists idx_instance_action_instance_id on instance_action (instance_id);
 create index if not exists idx_instance_action_accepted_at on instance_action (accepted_at);
 
-create table if not exists instance_agent_guidance (
+do $$
+begin
+    if to_regclass('public.instance_agent_guidance') is not null
+        and to_regclass('public.instance_main_prompt') is null then
+        alter table instance_agent_guidance rename to instance_main_prompt;
+    end if;
+
+    if to_regclass('public.idx_instance_agent_guidance_updated_at') is not null
+        and to_regclass('public.idx_instance_main_prompt_updated_at') is null then
+        alter index idx_instance_agent_guidance_updated_at rename to idx_instance_main_prompt_updated_at;
+    end if;
+end
+$$;
+
+create table if not exists instance_main_prompt (
     instance_id uuid primary key references claw_instance (id) on delete cascade,
     agents_md text not null,
     enabled boolean not null default true,
@@ -39,37 +53,37 @@ create table if not exists instance_agent_guidance (
     updated_at timestamptz not null
 );
 
-alter table instance_agent_guidance
+alter table instance_main_prompt
     add column if not exists agents_md text;
 
-alter table instance_agent_guidance
+alter table instance_main_prompt
     add column if not exists enabled boolean not null default true;
 
-update instance_agent_guidance
+update instance_main_prompt
 set enabled = true
 where enabled is null;
 
-alter table instance_agent_guidance
+alter table instance_main_prompt
     alter column enabled set not null;
 
-alter table instance_agent_guidance
+alter table instance_main_prompt
     add column if not exists updated_by varchar(128) null;
 
-alter table instance_agent_guidance
+alter table instance_main_prompt
     add column if not exists updated_at timestamptz;
 
-update instance_agent_guidance
+update instance_main_prompt
 set agents_md = ''
 where agents_md is null;
 
-alter table instance_agent_guidance
+alter table instance_main_prompt
     alter column agents_md set not null;
 
-update instance_agent_guidance
+update instance_main_prompt
 set updated_at = now()
 where updated_at is null;
 
-alter table instance_agent_guidance
+alter table instance_main_prompt
     alter column updated_at set not null;
 
-create index if not exists idx_instance_agent_guidance_updated_at on instance_agent_guidance (updated_at);
+create index if not exists idx_instance_main_prompt_updated_at on instance_main_prompt (updated_at);
