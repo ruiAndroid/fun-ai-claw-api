@@ -37,6 +37,8 @@ Schema is auto-initialized at startup via `src/main/resources/schema.sql`.
 - `GET /v1/instances/{instanceId}/main-agent-guidance`
 - `PUT /v1/instances/{instanceId}/main-agent-guidance`
 - `DELETE /v1/instances/{instanceId}/main-agent-guidance`
+- `WS /v1/agent-session/ws?instanceId=<uuid>`
+- `WS /v1/terminal/ws?instanceId=<uuid>`
 
 ## Runtime Image Presets
 
@@ -61,6 +63,15 @@ app:
   - `PLANE_BASE_URL` (default: `http://127.0.0.1:8090/internal/v1`)
   - `PLANE_REQUESTED_BY` (default: `fun-ai-claw-api`)
 - Instance main-agent guidance is stored in DB table `instance_main_prompt`.
+- Agent Session websocket launches interactive `zeroclaw agent` inside the target container and keeps multi-turn confirmation context until the client disconnects.
+- Agent Session defaults can be adjusted with:
+  - `AGENT_SESSION_DOCKER_COMMAND`
+  - `AGENT_SESSION_CONTAINER_PREFIX`
+  - `AGENT_SESSION_COMMAND`
+  - `AGENT_SESSION_LANG`
+  - `AGENT_SESSION_LC_ALL`
+  - `AGENT_SESSION_RUST_LOG`
+  - `AGENT_SESSION_PROCESS_SHUTDOWN_TIMEOUT_SECONDS`
 - Runtime sync resolution priority on START/RESTART/ROLLBACK:
   1. Instance override (`enabled=true`)
   2. Global fallback file (`app.agent-guidance.default-main-agents-md-path`)

@@ -45,6 +45,14 @@ app:
     container-prefix: ${INSTANCE_AGENTS_CONTAINER_PREFIX:funclaw}
     config-path: ${INSTANCE_AGENTS_CONFIG_PATH:/data/zeroclaw/config.toml}
     command-timeout-seconds: ${INSTANCE_AGENTS_COMMAND_TIMEOUT_SECONDS:8}
+  agent-session:
+    docker-command: ${AGENT_SESSION_DOCKER_COMMAND:docker}
+    container-prefix: ${AGENT_SESSION_CONTAINER_PREFIX:funclaw}
+    command: ${AGENT_SESSION_COMMAND:zeroclaw agent --config-dir /data/zeroclaw}
+    lang: ${AGENT_SESSION_LANG:C.UTF-8}
+    lc-all: ${AGENT_SESSION_LC_ALL:C.UTF-8}
+    rust-log: ${AGENT_SESSION_RUST_LOG:warn}
+    process-shutdown-timeout-seconds: ${AGENT_SESSION_PROCESS_SHUTDOWN_TIMEOUT_SECONDS:4}
   terminal:
     docker-command: ${TERMINAL_DOCKER_COMMAND:docker}
     container-prefix: ${TERMINAL_CONTAINER_PREFIX:funclaw}
