@@ -28,9 +28,12 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 @Component
 public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
+
+    private static final Pattern ANSI_ESCAPE_PATTERN = Pattern.compile("\\u001B\\[[0-9;?]*[ -/]*[@-~]");
 
     private final InstanceRepository instanceRepository;
     private final String dockerCommand;
@@ -166,7 +169,7 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
                 if (read == 0) {
                     continue;
                 }
-                String output = new String(buffer, 0, read, StandardCharsets.UTF_8);
+                String output = stripAnsiEscapeCodes(new String(buffer, 0, read, StandardCharsets.UTF_8));
                 synchronized (context.session()) {
                     context.session().sendMessage(new TextMessage(output));
                 }
@@ -278,6 +281,10 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
         } catch (IOException ignored) {
             // Ignore close failures.
         }
+    }
+
+    private String stripAnsiEscapeCodes(String output) {
+        return ANSI_ESCAPE_PATTERN.matcher(output).replaceAll("");
     }
 
     private static final class AgentSessionContext {
