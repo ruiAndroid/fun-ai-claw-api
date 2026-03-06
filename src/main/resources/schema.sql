@@ -31,19 +31,8 @@ create table if not exists instance_action (
 create index if not exists idx_instance_action_instance_id on instance_action (instance_id);
 create index if not exists idx_instance_action_accepted_at on instance_action (accepted_at);
 
-do $$
-begin
-    if to_regclass('public.instance_agent_guidance') is not null
-        and to_regclass('public.instance_main_prompt') is null then
-        alter table instance_agent_guidance rename to instance_main_prompt;
-    end if;
-
-    if to_regclass('public.idx_instance_agent_guidance_updated_at') is not null
-        and to_regclass('public.idx_instance_main_prompt_updated_at') is null then
-        alter index idx_instance_agent_guidance_updated_at rename to idx_instance_main_prompt_updated_at;
-    end if;
-end
-$$;
+alter table if exists instance_agent_guidance rename to instance_main_prompt;
+alter index if exists idx_instance_agent_guidance_updated_at rename to idx_instance_main_prompt_updated_at;
 
 create table if not exists instance_main_prompt (
     instance_id uuid primary key references claw_instance (id) on delete cascade,
