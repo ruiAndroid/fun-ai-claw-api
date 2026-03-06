@@ -31,26 +31,6 @@ create table if not exists instance_action (
 create index if not exists idx_instance_action_instance_id on instance_action (instance_id);
 create index if not exists idx_instance_action_accepted_at on instance_action (accepted_at);
 
-create table if not exists agent_task (
-    task_id uuid primary key,
-    confirm_token varchar(64) not null unique,
-    instance_id uuid not null references claw_instance (id) on delete cascade,
-    agent_id varchar(128) not null,
-    status varchar(16) not null,
-    request_message text not null,
-    response_body text null,
-    error_message text null,
-    expires_at timestamptz not null,
-    started_at timestamptz null,
-    finished_at timestamptz null,
-    created_at timestamptz not null,
-    updated_at timestamptz not null
-);
-
-create index if not exists idx_agent_task_status on agent_task (status);
-create index if not exists idx_agent_task_created_at on agent_task (created_at);
-create index if not exists idx_agent_task_expires_at on agent_task (expires_at);
-
 create table if not exists instance_agent_guidance (
     instance_id uuid primary key references claw_instance (id) on delete cascade,
     agents_md text not null,
