@@ -24,7 +24,7 @@ app:
     base-url: ${PLANE_BASE_URL:http://127.0.0.1:8090/internal/v1}
     requested-by: ${PLANE_REQUESTED_BY:fun-ai-claw-api}
     connect-timeout-seconds: ${PLANE_CONNECT_TIMEOUT_SECONDS:3}
-    request-timeout-seconds: ${PLANE_REQUEST_TIMEOUT_SECONDS:180}
+    request-timeout-seconds: ${PLANE_REQUEST_TIMEOUT_SECONDS:90}
   gateway:
     port-range-start: ${GATEWAY_PORT_RANGE_START:42617}
     port-range-end: ${GATEWAY_PORT_RANGE_END:42717}
