@@ -3,6 +3,7 @@ package com.fun.ai.claw.api.service;
 import com.fun.ai.claw.api.model.InstanceActionType;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
@@ -10,6 +11,8 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.net.http.HttpClient;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -26,8 +29,19 @@ public class PlaneClient {
 
     public PlaneClient(@Value("${app.plane.base-url:http://127.0.0.1:8090/internal/v1}") String planeBaseUrl,
                        @Value("${app.plane.requested-by:fun-ai-claw-api}") String requestedBy,
+                       @Value("${app.plane.connect-timeout-seconds:3}") long connectTimeoutSeconds,
+                       @Value("${app.plane.request-timeout-seconds:90}") long requestTimeoutSeconds,
                        InstanceMainAgentGuidanceService instanceMainAgentGuidanceService) {
-        this.restClient = RestClient.create();
+        long resolvedConnectTimeoutSeconds = connectTimeoutSeconds > 0 ? connectTimeoutSeconds : 3;
+        long resolvedRequestTimeoutSeconds = requestTimeoutSeconds > 0 ? requestTimeoutSeconds : 90;
+        HttpClient httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(resolvedConnectTimeoutSeconds))
+                .build();
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
+        requestFactory.setReadTimeout(Duration.ofSeconds(resolvedRequestTimeoutSeconds));
+        this.restClient = RestClient.builder()
+                .requestFactory(requestFactory)
+                .build();
         this.planeBaseUrl = planeBaseUrl;
         this.requestedBy = requestedBy;
         this.instanceMainAgentGuidanceService = instanceMainAgentGuidanceService;
