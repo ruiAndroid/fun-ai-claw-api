@@ -12,8 +12,9 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -42,16 +43,19 @@ public class InstanceSkillService {
     private final String containerPrefix;
     private final String configPath;
     private final Duration commandTimeout;
+    private final List<String> fallbackSkillDirs;
 
     public InstanceSkillService(InstanceRepository instanceRepository,
                                 @Value("${app.instance-skills.docker-command:docker}") String dockerCommand,
                                 @Value("${app.instance-skills.container-prefix:funclaw}") String containerPrefix,
                                 @Value("${app.instance-skills.config-path:/data/zeroclaw/config.toml}") String configPath,
+                                @Value("${app.instance-skills.fallback-skill-dirs:/zeroclaw-data/workspace/skills,/workspace/agent-mgc-novel-script/skills}") List<String> fallbackSkillDirs,
                                 @Value("${app.instance-skills.command-timeout-seconds:8}") long commandTimeoutSeconds) {
         this.instanceRepository = instanceRepository;
         this.dockerCommand = StringUtils.hasText(dockerCommand) ? dockerCommand.trim() : "docker";
         this.containerPrefix = StringUtils.hasText(containerPrefix) ? containerPrefix.trim() : "funclaw";
         this.configPath = StringUtils.hasText(configPath) ? configPath.trim() : "/data/zeroclaw/config.toml";
+        this.fallbackSkillDirs = normalizeFallbackSkillDirs(fallbackSkillDirs);
         long timeoutSeconds = commandTimeoutSeconds > 0 ? commandTimeoutSeconds : 8;
         this.commandTimeout = Duration.ofSeconds(timeoutSeconds);
     }
@@ -67,34 +71,76 @@ public class InstanceSkillService {
         }
 
         SkillsConfig skillsConfig = parseSkillsConfig(loadedConfig.text());
-        if (!skillsConfig.openSkillsEnabled() || !StringUtils.hasText(skillsConfig.openSkillsDir())) {
+        List<String> skillDirs = resolveSkillDirs(skillsConfig);
+        if (skillDirs.isEmpty()) {
             return List.of();
         }
 
-        List<String> skillFiles = listSkillFiles(containerName, skillsConfig.openSkillsDir());
-        List<SkillDescriptorResponse> skills = new ArrayList<>();
-        for (String skillFilePath : skillFiles) {
-            CommandResult skillResult = runCommand(
-                    dockerCommand,
-                    "exec",
-                    containerName,
-                    "/bin/busybox",
-                    "cat",
-                    skillFilePath
-            );
-            if (skillResult.exitCode != 0) {
-                continue;
+        LinkedHashMap<String, SkillDescriptorResponse> skillsById = new LinkedHashMap<>();
+        for (String skillDir : skillDirs) {
+            List<String> skillFiles = listSkillFiles(containerName, skillDir);
+            for (String skillFilePath : skillFiles) {
+                String skillId = resolveSkillId(skillFilePath);
+                if (skillsById.containsKey(skillId)) {
+                    continue;
+                }
+                CommandResult skillResult = runCommand(
+                        dockerCommand,
+                        "exec",
+                        containerName,
+                        "/bin/busybox",
+                        "cat",
+                        skillFilePath
+                );
+                if (skillResult.exitCode != 0) {
+                    continue;
+                }
+                String prompt = normalizeText(skillResult.output);
+                skillsById.put(skillId, new SkillDescriptorResponse(
+                        skillId,
+                        skillFilePath,
+                        prompt
+                ));
             }
-            String prompt = normalizeText(skillResult.output);
-            skills.add(new SkillDescriptorResponse(
-                    resolveSkillId(skillFilePath),
-                    skillFilePath,
-                    prompt
-            ));
         }
-        return skills.stream()
+
+        return skillsById.values().stream()
                 .sorted(Comparator.comparing(SkillDescriptorResponse::id))
                 .toList();
+    }
+
+    private List<String> resolveSkillDirs(SkillsConfig skillsConfig) {
+        LinkedHashSet<String> orderedDirs = new LinkedHashSet<>();
+        if (skillsConfig.openSkillsEnabled() && StringUtils.hasText(skillsConfig.openSkillsDir())) {
+            orderedDirs.add(skillsConfig.openSkillsDir().trim());
+        }
+        orderedDirs.addAll(fallbackSkillDirs);
+        return orderedDirs.stream()
+                .filter(StringUtils::hasText)
+                .toList();
+    }
+
+    private List<String> normalizeFallbackSkillDirs(List<String> rawDirs) {
+        if (rawDirs == null || rawDirs.isEmpty()) {
+            return List.of();
+        }
+        LinkedHashSet<String> normalized = new LinkedHashSet<>();
+        for (String rawDir : rawDirs) {
+            if (!StringUtils.hasText(rawDir)) {
+                continue;
+            }
+            String trimmed = rawDir.trim();
+            if (trimmed.contains(",")) {
+                for (String split : trimmed.split(",")) {
+                    if (StringUtils.hasText(split)) {
+                        normalized.add(split.trim());
+                    }
+                }
+                continue;
+            }
+            normalized.add(trimmed);
+        }
+        return List.copyOf(normalized);
     }
 
     private LoadedConfig readConfig(String containerName) {
