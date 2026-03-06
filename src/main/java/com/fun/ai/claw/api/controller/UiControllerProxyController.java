@@ -1,5 +1,7 @@
 package com.fun.ai.claw.api.controller;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fun.ai.claw.api.model.ClawInstanceDto;
 import com.fun.ai.claw.api.repository.InstanceRepository;
 import jakarta.servlet.http.HttpServletRequest;
@@ -43,6 +45,7 @@ import java.util.regex.Pattern;
 @RestController
 public class UiControllerProxyController {
     private static final Logger log = LoggerFactory.getLogger(UiControllerProxyController.class);
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final String ZEROCLAW_DEFAULT_CONFIG_PATH = "/data/zeroclaw/config.toml";
     private static final Pattern CONFIG_PATH_PATTERN = Pattern.compile("(?i)\"config_path\"\\s*:\\s*\"[^\"]*\"");
     private static final Pattern CONFIG_PATH_CAMEL_PATTERN = Pattern.compile("(?i)\"configPath\"\\s*:\\s*\"[^\"]*\"");
@@ -206,6 +209,16 @@ public class UiControllerProxyController {
 
         URI targetUri = buildTargetUri(instanceId, gatewayHostPort, request);
         byte[] normalizedRequestBody = rewriteConfigSavePayloadIfNeeded(instanceId, request, requestBody, targetUri);
+        byte[] configSaveBytes = extractConfigSaveBytes(request, targetUri, normalizedRequestBody);
+        if (shouldHandleConfigSaveDirectly(request, targetUri, configSaveBytes)) {
+            log.info("ui proxy handle /api/config save directly for instanceId={}, uri={}", instanceId, targetUri);
+            if (saveConfigFileToContainer(instanceId, configSaveBytes)) {
+                return buildConfigSaveSuccessResponse("ui-proxy-direct");
+            }
+            log.warn("ui proxy direct /api/config save failed for instanceId={}, uri={}, fallback to upstream",
+                    instanceId,
+                    targetUri);
+        }
         HttpRequest outboundRequest = buildOutboundRequest(request, normalizedRequestBody, targetUri);
         HttpResponse<byte[]> upstreamResponse = send(outboundRequest);
         if (isConfigEndpoint(targetUri.getPath()) && upstreamResponse.statusCode() >= 500) {
@@ -234,13 +247,10 @@ public class UiControllerProxyController {
                 }
             }
         }
-        if (shouldApplyDirectConfigSaveFallback(request, targetUri, normalizedRequestBody, upstreamResponse)) {
+        if (shouldApplyDirectConfigSaveFallback(request, targetUri, configSaveBytes, upstreamResponse)) {
             log.warn("ui proxy trigger config-save fallback for instanceId={}, uri={}", instanceId, targetUri);
-            if (saveConfigFileToContainer(instanceId, normalizedRequestBody)) {
-                HttpHeaders fallbackHeaders = new HttpHeaders();
-                fallbackHeaders.set(HttpHeaders.CONTENT_TYPE, "application/json");
-                byte[] body = "{\"saved\":true,\"source\":\"ui-proxy-fallback\"}".getBytes(StandardCharsets.UTF_8);
-                return new ResponseEntity<>(body, fallbackHeaders, HttpStatusCode.valueOf(200));
+            if (saveConfigFileToContainer(instanceId, configSaveBytes)) {
+                return buildConfigSaveSuccessResponse("ui-proxy-fallback");
             }
             log.warn("ui proxy fallback execution failed for instanceId={}, uri={}", instanceId, targetUri);
         }
@@ -448,6 +458,65 @@ public class UiControllerProxyController {
         return errorText.contains("config path must have a parent directory");
     }
 
+    private boolean shouldHandleConfigSaveDirectly(HttpServletRequest inboundRequest,
+                                                   URI targetUri,
+                                                   byte[] configBytes) {
+        if (targetUri == null || !isConfigEndpoint(targetUri.getPath())) {
+            return false;
+        }
+        if (configBytes == null || configBytes.length == 0) {
+            return false;
+        }
+        String method = inboundRequest.getMethod();
+        return "PUT".equalsIgnoreCase(method)
+                || "POST".equalsIgnoreCase(method)
+                || "PATCH".equalsIgnoreCase(method);
+    }
+
+    private byte[] extractConfigSaveBytes(HttpServletRequest inboundRequest,
+                                          URI targetUri,
+                                          byte[] requestBody) {
+        if (requestBody == null || requestBody.length == 0 || targetUri == null || !isConfigEndpoint(targetUri.getPath())) {
+            return requestBody;
+        }
+
+        String contentType = inboundRequest.getContentType();
+        if (!StringUtils.hasText(contentType)) {
+            return requestBody;
+        }
+
+        String normalizedContentType = contentType.toLowerCase(Locale.ROOT);
+        if (!normalizedContentType.contains("json")) {
+            return requestBody;
+        }
+
+        try {
+            JsonNode root = OBJECT_MAPPER.readTree(requestBody);
+            JsonNode contentNode = firstTextNode(root, "content", "config", "toml", "text", "value");
+            if (contentNode == null || !contentNode.isTextual()) {
+                log.warn("ui proxy config save JSON payload did not contain textual config content");
+                return requestBody;
+            }
+            return contentNode.asText().getBytes(StandardCharsets.UTF_8);
+        } catch (IOException ex) {
+            log.warn("ui proxy failed to parse config save JSON payload: {}", ex.getMessage());
+            return requestBody;
+        }
+    }
+
+    private JsonNode firstTextNode(JsonNode root, String... fieldNames) {
+        if (root == null || !root.isObject()) {
+            return null;
+        }
+        for (String fieldName : fieldNames) {
+            JsonNode candidate = root.get(fieldName);
+            if (candidate != null && candidate.isTextual()) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
     private boolean saveConfigFileToContainer(UUID instanceId, byte[] configBytes) {
         if (!StringUtils.hasText(configSaveFallbackPath) || !StringUtils.hasText(containerPrefix)) {
             return false;
@@ -489,8 +558,28 @@ public class UiControllerProxyController {
             log.warn("ui proxy fallback write failed for {}: {}", containerName, writeResult.output);
             return false;
         }
+        CommandResult chmodResult = runProcess(List.of(
+                dockerCommand,
+                "exec",
+                containerName,
+                "/bin/busybox",
+                "chmod",
+                "600",
+                path
+        ), null);
+        if (chmodResult.exitCode != 0) {
+            log.warn("ui proxy fallback chmod failed for {}: {}", containerName, chmodResult.output);
+        }
         log.info("ui proxy fallback saved config directly to container {} at {}", containerName, path);
         return true;
+    }
+
+    private ResponseEntity<byte[]> buildConfigSaveSuccessResponse(String source) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(HttpHeaders.CONTENT_TYPE, "application/json");
+        byte[] body = ("{\"saved\":true,\"source\":\"" + source + "\"}")
+                .getBytes(StandardCharsets.UTF_8);
+        return new ResponseEntity<>(body, headers, HttpStatus.OK);
     }
 
     private CommandResult runProcess(List<String> command, byte[] stdinBytes) {
