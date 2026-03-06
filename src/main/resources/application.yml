@@ -51,7 +51,7 @@ app:
     command: ${AGENT_SESSION_COMMAND:zeroclaw agent --config-dir /data/zeroclaw}
     lang: ${AGENT_SESSION_LANG:C.UTF-8}
     lc-all: ${AGENT_SESSION_LC_ALL:C.UTF-8}
-    rust-log: ${AGENT_SESSION_RUST_LOG:warn}
+    rust-log: ${AGENT_SESSION_RUST_LOG:info}
     process-shutdown-timeout-seconds: ${AGENT_SESSION_PROCESS_SHUTDOWN_TIMEOUT_SECONDS:4}
   terminal:
     docker-command: ${TERMINAL_DOCKER_COMMAND:docker}
