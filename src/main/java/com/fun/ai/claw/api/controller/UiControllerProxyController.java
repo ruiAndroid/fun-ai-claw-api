@@ -523,31 +523,21 @@ public class UiControllerProxyController {
             return false;
         }
 
+        String shellPath = quoteForSingleQuotedShell(path);
+        String writeCommand = "cat > '" + shellPath + "' && chmod 600 '" + shellPath + "'";
         CommandResult writeResult = runProcess(List.of(
                 dockerCommand,
                 "exec",
                 "-i",
                 containerName,
                 "/bin/busybox",
-                "dd",
-                "of=" + path,
-                "conv=fsync"
+                "sh",
+                "-lc",
+                writeCommand
         ), configBytes);
         if (writeResult.exitCode != 0) {
             log.warn("ui proxy fallback write failed for {}: {}", containerName, writeResult.output);
             return false;
-        }
-        CommandResult chmodResult = runProcess(List.of(
-                dockerCommand,
-                "exec",
-                containerName,
-                "/bin/busybox",
-                "chmod",
-                "600",
-                path
-        ), null);
-        if (chmodResult.exitCode != 0) {
-            log.warn("ui proxy fallback chmod failed for {}: {}", containerName, chmodResult.output);
         }
         log.info("ui proxy fallback saved config directly to container {} at {}", containerName, path);
         return true;
@@ -633,6 +623,10 @@ public class UiControllerProxyController {
             }
         }
         return decoded.toString();
+    }
+
+    private String quoteForSingleQuotedShell(String value) {
+        return value.replace("'", "'\"'\"'");
     }
 
     private CommandResult runProcess(List<String> command, byte[] stdinBytes) {
