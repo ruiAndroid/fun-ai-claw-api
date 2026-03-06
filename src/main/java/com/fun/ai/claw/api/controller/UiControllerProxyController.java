@@ -46,6 +46,9 @@ public class UiControllerProxyController {
     private static final String ZEROCLAW_DEFAULT_CONFIG_PATH = "/data/zeroclaw/config.toml";
     private static final Pattern CONFIG_PATH_PATTERN = Pattern.compile("(?i)\"config_path\"\\s*:\\s*\"[^\"]*\"");
     private static final Pattern CONFIG_PATH_CAMEL_PATTERN = Pattern.compile("(?i)\"configPath\"\\s*:\\s*\"[^\"]*\"");
+    private static final Pattern PATH_PATTERN = Pattern.compile("(?i)\"path\"\\s*:\\s*\"[^\"]*\"");
+    private static final Pattern FILE_PATH_PATTERN = Pattern.compile("(?i)\"file_path\"\\s*:\\s*\"[^\"]*\"");
+    private static final Pattern FILE_PATH_CAMEL_PATTERN = Pattern.compile("(?i)\"filePath\"\\s*:\\s*\"[^\"]*\"");
     private static final Pattern STATUS_PAIRED_FALSE_PATTERN = Pattern.compile("(?i)\"paired\"\\s*:\\s*false");
     private static final Pattern API_KEYS_PATTERN = Pattern.compile("(?is)\\bapi_keys\\s*=\\s*\\[(.*?)]");
     private static final Pattern DEFAULT_PROVIDER_PATTERN = Pattern.compile("(?m)^\\s*default_provider\\s*=\\s*\"([^\"]+)\"\\s*$");
@@ -601,6 +604,12 @@ public class UiControllerProxyController {
                 .replaceAll("\"config_path\":\"" + ZEROCLAW_DEFAULT_CONFIG_PATH + "\"");
         rewritten = CONFIG_PATH_CAMEL_PATTERN.matcher(rewritten)
                 .replaceAll("\"configPath\":\"" + ZEROCLAW_DEFAULT_CONFIG_PATH + "\"");
+        rewritten = PATH_PATTERN.matcher(rewritten)
+                .replaceAll("\"path\":\"" + ZEROCLAW_DEFAULT_CONFIG_PATH + "\"");
+        rewritten = FILE_PATH_PATTERN.matcher(rewritten)
+                .replaceAll("\"file_path\":\"" + ZEROCLAW_DEFAULT_CONFIG_PATH + "\"");
+        rewritten = FILE_PATH_CAMEL_PATTERN.matcher(rewritten)
+                .replaceAll("\"filePath\":\"" + ZEROCLAW_DEFAULT_CONFIG_PATH + "\"");
 
         if (rewritten.equals(raw) && rewritten.trim().endsWith("}")) {
             String suffix = rewritten.trim();
@@ -608,8 +617,8 @@ public class UiControllerProxyController {
             if (braceIndex > 0) {
                 boolean hasFields = suffix.length() > 2 && suffix.charAt(0) == '{';
                 String insertion = hasFields
-                        ? ",\"config_path\":\"" + ZEROCLAW_DEFAULT_CONFIG_PATH + "\""
-                        : "\"config_path\":\"" + ZEROCLAW_DEFAULT_CONFIG_PATH + "\"";
+                        ? ",\"config_path\":\"" + ZEROCLAW_DEFAULT_CONFIG_PATH + "\",\"path\":\"" + ZEROCLAW_DEFAULT_CONFIG_PATH + "\""
+                        : "\"config_path\":\"" + ZEROCLAW_DEFAULT_CONFIG_PATH + "\",\"path\":\"" + ZEROCLAW_DEFAULT_CONFIG_PATH + "\"";
                 rewritten = rewritten.substring(0, braceIndex) + insertion + rewritten.substring(braceIndex);
             }
         }

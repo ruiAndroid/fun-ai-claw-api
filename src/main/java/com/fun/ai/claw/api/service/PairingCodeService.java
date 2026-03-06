@@ -40,6 +40,8 @@ public class PairingCodeService {
     private final String fixedPairingCode;
     private final String fixedLinkPath;
     private final String gatewayUrlTemplate;
+    private final String gatewayProbeScheme;
+    private final String gatewayProbeHost;
     private final String autoAuthQueryParam;
     private final String authTokenQueryParam;
     private final String dockerCommand;
@@ -52,6 +54,8 @@ public class PairingCodeService {
     public PairingCodeService(InstanceRepository instanceRepository,
                               @Value("${app.pairing-code.fixed-code:809393}") String fixedPairingCode,
                               @Value("${app.pairing-code.fixed-link-path:/}") String fixedLinkPath,
+                              @Value("${app.ui-controller.upstream-scheme:http}") String gatewayProbeScheme,
+                              @Value("${app.ui-controller.upstream-host:127.0.0.1}") String gatewayProbeHost,
                               @Value("${app.pairing-code.auto-auth-query-param:autoAuth}") String autoAuthQueryParam,
                               @Value("${app.pairing-code.auth-token-query-param:authToken}") String authTokenQueryParam,
                               @Value("${app.pairing-code.docker-command:docker}") String dockerCommand,
@@ -63,6 +67,8 @@ public class PairingCodeService {
         this.instanceRepository = instanceRepository;
         this.fixedPairingCode = fixedPairingCode == null ? "" : fixedPairingCode.trim();
         this.fixedLinkPath = normalizeFixedLinkPath(fixedLinkPath);
+        this.gatewayProbeScheme = normalizeProbeScheme(gatewayProbeScheme);
+        this.gatewayProbeHost = requireProbeHost(gatewayProbeHost);
         this.autoAuthQueryParam = StringUtils.hasText(autoAuthQueryParam) ? autoAuthQueryParam.trim() : "autoAuth";
         this.authTokenQueryParam = StringUtils.hasText(authTokenQueryParam) ? authTokenQueryParam.trim() : "authToken";
         this.dockerCommand = StringUtils.hasText(dockerCommand) ? dockerCommand.trim() : "docker";
@@ -83,6 +89,7 @@ public class PairingCodeService {
         Instant fetchedAt = Instant.now();
 
         String gatewayUrl = resolveGatewayUrl(instance.id(), instance.gatewayHostPort());
+        String directGatewayProbeUrl = resolveGatewayProbeUrl(instance.gatewayHostPort());
         if (!StringUtils.hasText(gatewayUrl)) {
             return new PairingCodeResponse(
                     instance.id(),
@@ -95,7 +102,8 @@ public class PairingCodeService {
         }
 
         String pairingLink = buildPairingLink(gatewayUrl);
-        if (isUnauthenticatedAccessAvailable(gatewayUrl)) {
+        String authProbeBaseUrl = StringUtils.hasText(directGatewayProbeUrl) ? directGatewayProbeUrl : gatewayUrl;
+        if (isUnauthenticatedAccessAvailable(authProbeBaseUrl)) {
             return new PairingCodeResponse(
                     instance.id(),
                     null,
@@ -106,7 +114,7 @@ public class PairingCodeService {
             );
         }
         List<String> candidateTokens = readPairedTokens(instance.id());
-        String usableToken = findUsableToken(candidateTokens, gatewayUrl);
+        String usableToken = findUsableToken(candidateTokens, authProbeBaseUrl);
 
         if (StringUtils.hasText(usableToken)) {
             String tokenLink = appendQueryParam(pairingLink, autoAuthQueryParam, "1");
@@ -287,6 +295,24 @@ public class PairingCodeService {
         return trimmed.startsWith("/") ? trimmed : "/" + trimmed;
     }
 
+    private String normalizeProbeScheme(String scheme) {
+        if (!StringUtils.hasText(scheme)) {
+            return "http";
+        }
+        String normalized = scheme.trim().toLowerCase(Locale.ROOT);
+        if (!normalized.equals("http") && !normalized.equals("https")) {
+            return "http";
+        }
+        return normalized;
+    }
+
+    private String requireProbeHost(String host) {
+        if (!StringUtils.hasText(host)) {
+            return "127.0.0.1";
+        }
+        return host.trim();
+    }
+
     private String resolveGatewayUrl(UUID instanceId, Integer gatewayHostPort) {
         if (gatewayHostPort == null || !StringUtils.hasText(gatewayUrlTemplate)) {
             return null;
@@ -294,6 +320,13 @@ public class PairingCodeService {
         return gatewayUrlTemplate
                 .replace("{port}", String.valueOf(gatewayHostPort))
                 .replace("{instanceId}", instanceId.toString());
+    }
+
+    private String resolveGatewayProbeUrl(Integer gatewayHostPort) {
+        if (gatewayHostPort == null || gatewayHostPort <= 0 || gatewayHostPort > 65535) {
+            return null;
+        }
+        return gatewayProbeScheme + "://" + gatewayProbeHost + ":" + gatewayHostPort;
     }
 
     private String buildPairingLink(String gatewayUrl) {
