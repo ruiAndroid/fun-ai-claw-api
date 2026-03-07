@@ -16,6 +16,7 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 import org.springframework.web.util.UriComponentsBuilder;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -42,8 +43,10 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
     private static final Pattern ANSI_ESCAPE_PATTERN = Pattern.compile("\\u001B\\[[0-9;?]*[ -/]*[@-~]");
     private static final Pattern AGENT_INTERACTION_BLOCK_PATTERN =
             Pattern.compile("(?is)<fun_claw_interaction>\\s*(\\{.*?})\\s*</fun_claw_interaction>");
+    private static final Pattern AGENT_ID_PATTERN = Pattern.compile("[A-Za-z0-9_-]+");
 
     private final InstanceRepository instanceRepository;
+    private final InstanceAgentService instanceAgentService;
     private final JsonParser jsonParser = JsonParserFactory.getJsonParser();
     private final String dockerCommand;
     private final String containerPrefix;
@@ -56,6 +59,7 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
     private final Map<String, AgentSessionContext> contexts = new ConcurrentHashMap<>();
 
     public AgentSessionWebSocketHandler(InstanceRepository instanceRepository,
+                                        InstanceAgentService instanceAgentService,
                                         @Value("${app.agent-session.docker-command:docker}") String dockerCommand,
                                         @Value("${app.agent-session.container-prefix:funclaw}") String containerPrefix,
                                         @Value("${app.agent-session.command:zeroclaw agent --config-dir /data/zeroclaw}") String agentCommand,
@@ -64,6 +68,7 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
                                         @Value("${app.agent-session.rust-log:warn}") String rustLog,
                                         @Value("${app.agent-session.process-shutdown-timeout-seconds:4}") long processShutdownTimeoutSeconds) {
         this.instanceRepository = instanceRepository;
+        this.instanceAgentService = instanceAgentService;
         this.dockerCommand = dockerCommand;
         this.containerPrefix = containerPrefix;
         this.agentCommandParts = parseCommand(agentCommand);
@@ -100,10 +105,15 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
             return;
         }
 
+        Optional<String> agentId = parseAgentId(safeSession);
+        if (agentId.isPresent() && !validateAgentProfileSelection(safeSession, instanceId.get(), agentId.get())) {
+            return;
+        }
+
         String containerName = containerPrefix + "-" + instanceId.get();
         Process process;
         try {
-            process = new ProcessBuilder(buildExecCommand(containerName))
+            process = new ProcessBuilder(buildExecCommand(containerName, agentId.orElse(null)))
                     .redirectErrorStream(true)
                     .start();
         } catch (IOException ex) {
@@ -126,6 +136,7 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
         context.setReaderTask(readerTask);
 
         emitSystemMessage(context, "connected: " + containerName);
+        agentId.ifPresent(value -> emitSystemMessage(context, "agent profile selected: " + value));
         emitSystemMessage(context, "agent session ready: keep this connection open for follow-up interactions");
         emitSystemMessage(context, "tip: reply in the same session to confirm, revise, or continue the current interaction");
     }
@@ -648,7 +659,7 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
         builder.append('"');
     }
 
-    private List<String> buildExecCommand(String containerName) {
+    private List<String> buildExecCommand(String containerName, String agentId) {
         List<String> command = new ArrayList<>();
         command.add(dockerCommand);
         command.add("exec");
@@ -658,6 +669,10 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
         addContainerEnv(command, "RUST_LOG", rustLog);
         command.add(containerName);
         command.addAll(agentCommandParts);
+        if (StringUtils.hasText(agentId)) {
+            command.add("--agent-profile");
+            command.add(agentId.trim());
+        }
         return command;
     }
 
@@ -696,6 +711,40 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
         } catch (IllegalArgumentException ex) {
             return Optional.empty();
         }
+    }
+
+    private Optional<String> parseAgentId(WebSocketSession session) {
+        if (session.getUri() == null) {
+            return Optional.empty();
+        }
+        String rawAgentId = UriComponentsBuilder.fromUri(session.getUri())
+                .build()
+                .getQueryParams()
+                .getFirst("agentId");
+        if (!StringUtils.hasText(rawAgentId)) {
+            return Optional.empty();
+        }
+        String normalized = rawAgentId.trim();
+        if (!AGENT_ID_PATTERN.matcher(normalized).matches()) {
+            return Optional.empty();
+        }
+        return Optional.of(normalized);
+    }
+
+    private boolean validateAgentProfileSelection(WebSocketSession session, UUID instanceId, String agentId) {
+        try {
+            String systemPrompt = instanceAgentService.getAgentSystemPrompt(instanceId, agentId).systemPrompt();
+            if (StringUtils.hasText(systemPrompt)) {
+                return true;
+            }
+            emitSystemMessage(session, instanceId, "selected agent profile has no system_prompt: " + agentId);
+        } catch (ResponseStatusException ex) {
+            emitSystemMessage(session, instanceId, "selected agent profile is unavailable: " + agentId);
+        } catch (RuntimeException ex) {
+            emitSystemMessage(session, instanceId, "failed to validate selected agent profile: " + ex.getMessage());
+        }
+        safeClose(session, CloseStatus.BAD_DATA);
+        return false;
     }
 
     private void safeClose(WebSocketSession session, CloseStatus status) {
