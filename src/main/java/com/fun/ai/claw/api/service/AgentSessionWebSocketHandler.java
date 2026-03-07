@@ -7,7 +7,6 @@ import jakarta.annotation.PreDestroy;
 import org.springframework.boot.json.JsonParseException;
 import org.springframework.boot.json.JsonParser;
 import org.springframework.boot.json.JsonParserFactory;
-import org.springframework.boot.json.JsonWriter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -46,7 +45,6 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
 
     private final InstanceRepository instanceRepository;
     private final JsonParser jsonParser = JsonParserFactory.getJsonParser();
-    private final JsonWriter<Object> jsonWriter = JsonWriter.standard();
     private final String dockerCommand;
     private final String containerPrefix;
     private final List<String> agentCommandParts;
@@ -498,7 +496,7 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
             return;
         }
         try {
-            String text = jsonWriter.writeToString(toJsonValue(payload));
+            String text = toJsonString(toJsonValue(payload));
             synchronized (session) {
                 session.sendMessage(new TextMessage(text));
             }
@@ -565,6 +563,89 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
             return values;
         }
         return payload;
+    }
+
+    private String toJsonString(Object value) {
+        StringBuilder builder = new StringBuilder(512);
+        appendJsonValue(builder, value);
+        return builder.toString();
+    }
+
+    @SuppressWarnings("unchecked")
+    private void appendJsonValue(StringBuilder builder, Object value) {
+        if (value == null) {
+            builder.append("null");
+            return;
+        }
+        if (value instanceof String text) {
+            appendJsonString(builder, text);
+            return;
+        }
+        if (value instanceof Number || value instanceof Boolean) {
+            builder.append(value);
+            return;
+        }
+        if (value instanceof Map<?, ?> map) {
+            builder.append('{');
+            boolean first = true;
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) map).entrySet()) {
+                if (!(entry.getKey() instanceof String key) || entry.getValue() == null) {
+                    continue;
+                }
+                if (!first) {
+                    builder.append(',');
+                }
+                first = false;
+                appendJsonString(builder, key);
+                builder.append(':');
+                appendJsonValue(builder, entry.getValue());
+            }
+            builder.append('}');
+            return;
+        }
+        if (value instanceof List<?> list) {
+            builder.append('[');
+            boolean first = true;
+            for (Object item : list) {
+                if (!first) {
+                    builder.append(',');
+                }
+                first = false;
+                appendJsonValue(builder, item);
+            }
+            builder.append(']');
+            return;
+        }
+        appendJsonString(builder, String.valueOf(value));
+    }
+
+    private void appendJsonString(StringBuilder builder, String value) {
+        builder.append('"');
+        for (int index = 0; index < value.length(); index++) {
+            char current = value.charAt(index);
+            switch (current) {
+                case '\\' -> builder.append("\\\\");
+                case '"' -> builder.append("\\\"");
+                case '\b' -> builder.append("\\b");
+                case '\f' -> builder.append("\\f");
+                case '\n' -> builder.append("\\n");
+                case '\r' -> builder.append("\\r");
+                case '\t' -> builder.append("\\t");
+                default -> {
+                    if (current < 0x20) {
+                        builder.append("\\u");
+                        String hex = Integer.toHexString(current);
+                        for (int pad = hex.length(); pad < 4; pad++) {
+                            builder.append('0');
+                        }
+                        builder.append(hex);
+                    } else {
+                        builder.append(current);
+                    }
+                }
+            }
+        }
+        builder.append('"');
     }
 
     private List<String> buildExecCommand(String containerName) {
