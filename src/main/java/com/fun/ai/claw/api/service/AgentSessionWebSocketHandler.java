@@ -1,11 +1,13 @@
 package com.fun.ai.claw.api.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fun.ai.claw.api.model.ClawInstanceDto;
 import com.fun.ai.claw.api.model.InstanceStatus;
 import com.fun.ai.claw.api.repository.InstanceRepository;
 import jakarta.annotation.PreDestroy;
+import org.springframework.boot.json.JsonParseException;
+import org.springframework.boot.json.JsonParser;
+import org.springframework.boot.json.JsonParserFactory;
+import org.springframework.boot.json.JsonWriter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -22,6 +24,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -42,7 +45,8 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
             Pattern.compile("(?is)<fun_claw_interaction>\\s*(\\{.*?})\\s*</fun_claw_interaction>");
 
     private final InstanceRepository instanceRepository;
-    private final ObjectMapper objectMapper;
+    private final JsonParser jsonParser = JsonParserFactory.getJsonParser();
+    private final JsonWriter<Object> jsonWriter = JsonWriter.standard();
     private final String dockerCommand;
     private final String containerPrefix;
     private final List<String> agentCommandParts;
@@ -54,7 +58,6 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
     private final Map<String, AgentSessionContext> contexts = new ConcurrentHashMap<>();
 
     public AgentSessionWebSocketHandler(InstanceRepository instanceRepository,
-                                        ObjectMapper objectMapper,
                                         @Value("${app.agent-session.docker-command:docker}") String dockerCommand,
                                         @Value("${app.agent-session.container-prefix:funclaw}") String containerPrefix,
                                         @Value("${app.agent-session.command:zeroclaw agent --config-dir /data/zeroclaw}") String agentCommand,
@@ -63,7 +66,6 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
                                         @Value("${app.agent-session.rust-log:warn}") String rustLog,
                                         @Value("${app.agent-session.process-shutdown-timeout-seconds:4}") long processShutdownTimeoutSeconds) {
         this.instanceRepository = instanceRepository;
-        this.objectMapper = objectMapper;
         this.dockerCommand = dockerCommand;
         this.containerPrefix = containerPrefix;
         this.agentCommandParts = parseCommand(agentCommand);
@@ -376,7 +378,7 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
             return null;
         }
         try {
-            JsonNode root = objectMapper.readTree(rawJson);
+            Map<String, Object> root = jsonParser.parseMap(rawJson);
             String version = textOrDefault(root.get("version"), "1.0");
             String type = textOrNull(root.get("type"));
             String stateId = firstNonBlank(
@@ -385,9 +387,9 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
             );
             String title = textOrNull(root.get("title"));
             List<AgentInteractionAction> actions = new ArrayList<>();
-            JsonNode actionsNode = root.get("actions");
-            if (actionsNode != null && actionsNode.isArray()) {
-                for (JsonNode node : actionsNode) {
+            Object actionsNode = root.get("actions");
+            if (actionsNode instanceof List<?> items) {
+                for (Object node : items) {
                     AgentInteractionAction action = parseInteractionAction(node);
                     if (action != null) {
                         actions.add(action);
@@ -398,19 +400,19 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
                 return null;
             }
             return new AgentInteraction(version, type.trim(), nullIfBlank(stateId), nullIfBlank(title), List.copyOf(actions));
-        } catch (IOException ignored) {
+        } catch (JsonParseException ignored) {
             return null;
         }
     }
 
-    private AgentInteractionAction parseInteractionAction(JsonNode node) {
-        if (node == null || !node.isObject()) {
+    private AgentInteractionAction parseInteractionAction(Object node) {
+        if (!(node instanceof Map<?, ?> values)) {
             return null;
         }
-        String id = textOrNull(node.get("id"));
-        String label = textOrNull(node.get("label"));
-        String kind = textOrNull(node.get("kind"));
-        String payload = textOrNull(node.get("payload"));
+        String id = textOrNull(values.get("id"));
+        String label = textOrNull(values.get("label"));
+        String kind = textOrNull(values.get("kind"));
+        String payload = textOrNull(values.get("payload"));
         if (!StringUtils.hasText(id)
                 || !StringUtils.hasText(label)
                 || !StringUtils.hasText(kind)
@@ -496,13 +498,73 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
             return;
         }
         try {
-            String text = objectMapper.writeValueAsString(payload);
+            String text = jsonWriter.writeToString(toJsonValue(payload));
             synchronized (session) {
                 session.sendMessage(new TextMessage(text));
             }
         } catch (IOException ignored) {
             // Connection may already be closed.
         }
+    }
+
+    private Object toJsonValue(Object payload) {
+        if (payload instanceof AgentSessionFrame frame) {
+            Map<String, Object> values = new LinkedHashMap<>();
+            values.put("version", frame.version());
+            values.put("eventType", frame.eventType());
+            values.put("instanceId", frame.instanceId() == null ? null : frame.instanceId().toString());
+            values.put("sessionId", frame.sessionId());
+            if (frame.message() != null) {
+                values.put("message", toJsonValue(frame.message()));
+            }
+            if (frame.chunk() != null) {
+                values.put("chunk", frame.chunk());
+            }
+            values.put("emittedAt", frame.emittedAt());
+            return values;
+        }
+        if (payload instanceof AgentSessionMessage message) {
+            Map<String, Object> values = new LinkedHashMap<>();
+            values.put("version", message.version());
+            values.put("messageId", message.messageId());
+            values.put("instanceId", message.instanceId() == null ? null : message.instanceId().toString());
+            values.put("sessionId", message.sessionId());
+            values.put("sequence", message.sequence());
+            values.put("role", message.role());
+            values.put("content", message.content());
+            values.put("pending", message.pending());
+            if (message.interaction() != null) {
+                values.put("interaction", toJsonValue(message.interaction()));
+            }
+            values.put("emittedAt", message.emittedAt());
+            return values;
+        }
+        if (payload instanceof AgentInteraction interaction) {
+            Map<String, Object> values = new LinkedHashMap<>();
+            values.put("version", interaction.version());
+            values.put("type", interaction.type());
+            if (interaction.stateId() != null) {
+                values.put("stateId", interaction.stateId());
+            }
+            if (interaction.title() != null) {
+                values.put("title", interaction.title());
+            }
+            List<Object> actions = new ArrayList<>();
+            for (AgentInteractionAction action : interaction.actions()) {
+                actions.add(toJsonValue(action));
+            }
+            values.put("actions", actions);
+            return values;
+        }
+        if (payload instanceof AgentInteractionAction action) {
+            Map<String, Object> values = new LinkedHashMap<>();
+            values.put("id", action.id());
+            values.put("label", action.label());
+            values.put("kind", action.kind());
+            values.put("payload", action.payload());
+            return values;
+        }
+        return payload;
     }
 
     private List<String> buildExecCommand(String containerName) {
@@ -601,16 +663,16 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
-    private String textOrDefault(JsonNode node, String defaultValue) {
+    private String textOrDefault(Object node, String defaultValue) {
         String value = textOrNull(node);
         return StringUtils.hasText(value) ? value.trim() : defaultValue;
     }
 
-    private String textOrNull(JsonNode node) {
-        if (node == null || node.isNull() || !node.isValueNode()) {
+    private String textOrNull(Object node) {
+        if (node == null) {
             return null;
         }
-        String value = node.asText();
+        String value = (node instanceof String) ? (String) node : String.valueOf(node);
         return StringUtils.hasText(value) ? value.trim() : null;
     }
 
