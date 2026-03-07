@@ -1,5 +1,7 @@
 package com.fun.ai.claw.api.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fun.ai.claw.api.model.ClawInstanceDto;
 import com.fun.ai.claw.api.model.InstanceStatus;
 import com.fun.ai.claw.api.repository.InstanceRepository;
@@ -18,6 +20,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -28,14 +31,18 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Component
 public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
 
     private static final Pattern ANSI_ESCAPE_PATTERN = Pattern.compile("\\u001B\\[[0-9;?]*[ -/]*[@-~]");
+    private static final Pattern AGENT_INTERACTION_BLOCK_PATTERN =
+            Pattern.compile("(?is)<fun_claw_interaction>\\s*(\\{.*?})\\s*</fun_claw_interaction>");
 
     private final InstanceRepository instanceRepository;
+    private final ObjectMapper objectMapper;
     private final String dockerCommand;
     private final String containerPrefix;
     private final List<String> agentCommandParts;
@@ -47,6 +54,7 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
     private final Map<String, AgentSessionContext> contexts = new ConcurrentHashMap<>();
 
     public AgentSessionWebSocketHandler(InstanceRepository instanceRepository,
+                                        ObjectMapper objectMapper,
                                         @Value("${app.agent-session.docker-command:docker}") String dockerCommand,
                                         @Value("${app.agent-session.container-prefix:funclaw}") String containerPrefix,
                                         @Value("${app.agent-session.command:zeroclaw agent --config-dir /data/zeroclaw}") String agentCommand,
@@ -55,6 +63,7 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
                                         @Value("${app.agent-session.rust-log:warn}") String rustLog,
                                         @Value("${app.agent-session.process-shutdown-timeout-seconds:4}") long processShutdownTimeoutSeconds) {
         this.instanceRepository = instanceRepository;
+        this.objectMapper = objectMapper;
         this.dockerCommand = dockerCommand;
         this.containerPrefix = containerPrefix;
         this.agentCommandParts = parseCommand(agentCommand);
@@ -74,19 +83,19 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
         WebSocketSession safeSession = new ConcurrentWebSocketSessionDecorator(session, 10_000, 1024 * 1024);
         Optional<UUID> instanceId = parseInstanceId(safeSession);
         if (instanceId.isEmpty()) {
-            sendSystemMessage(safeSession, "instanceId is required");
+            emitSystemMessage(safeSession, null, "instanceId is required");
             safeClose(safeSession, CloseStatus.BAD_DATA);
             return;
         }
 
         Optional<ClawInstanceDto> instance = instanceRepository.findById(instanceId.get());
         if (instance.isEmpty()) {
-            sendSystemMessage(safeSession, "instance not found");
+            emitSystemMessage(safeSession, instanceId.get(), "instance not found");
             safeClose(safeSession, CloseStatus.BAD_DATA);
             return;
         }
         if (instance.get().status() != InstanceStatus.RUNNING) {
-            sendSystemMessage(safeSession, "instance is not running");
+            emitSystemMessage(safeSession, instanceId.get(), "instance is not running");
             safeClose(safeSession, CloseStatus.POLICY_VIOLATION);
             return;
         }
@@ -98,7 +107,7 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
                     .redirectErrorStream(true)
                     .start();
         } catch (IOException ex) {
-            sendSystemMessage(safeSession, "failed to start agent session: " + ex.getMessage());
+            emitSystemMessage(safeSession, instanceId.get(), "failed to start agent session: " + ex.getMessage());
             safeClose(safeSession, CloseStatus.SERVER_ERROR);
             return;
         }
@@ -107,16 +116,18 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
                 safeSession,
                 process,
                 process.getOutputStream(),
-                null
+                null,
+                instanceId.get(),
+                containerName
         );
         contexts.put(safeSession.getId(), context);
 
         Future<?> readerTask = readerExecutor.submit(() -> streamProcessOutput(safeSession.getId()));
         context.setReaderTask(readerTask);
 
-        sendSystemMessage(safeSession, "connected: " + containerName);
-        sendSystemMessage(safeSession, "agent session ready: keep this connection open for step confirmations");
-        sendSystemMessage(safeSession, "tip: reply in the same session with messages like \"确认第1步\" or regeneration notes");
+        emitSystemMessage(context, "connected: " + containerName);
+        emitSystemMessage(context, "agent session ready: keep this connection open for follow-up interactions");
+        emitSystemMessage(context, "tip: reply in the same session to confirm, revise, or continue the current interaction");
     }
 
     @Override
@@ -134,7 +145,7 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
             context.stdin().write(payload.getBytes(StandardCharsets.UTF_8));
             context.stdin().flush();
         } catch (IOException ex) {
-            sendSystemMessage(context.session(), "write failed: " + ex.getMessage());
+            emitSystemMessage(context, "write failed: " + ex.getMessage());
             safeClose(context.session(), CloseStatus.SERVER_ERROR);
         }
     }
@@ -170,42 +181,327 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
                     continue;
                 }
                 String output = stripAnsiEscapeCodes(new String(buffer, 0, read, StandardCharsets.UTF_8));
-                synchronized (context.session()) {
-                    context.session().sendMessage(new TextMessage(output));
-                }
+                emitDebugFrame(context, output);
+                processOutputChunk(context, output);
             }
         } catch (IOException ignored) {
             // Connection/process ended.
         } finally {
+            flushBufferedOutput(context);
             safeClose(context.session(), CloseStatus.NORMAL);
         }
     }
 
-    private void cleanup(String sessionId) {
-        AgentSessionContext context = contexts.remove(sessionId);
-        if (context == null) {
+    private void processOutputChunk(AgentSessionContext context, String chunk) {
+        if (chunk == null || chunk.isEmpty()) {
+            return;
+        }
+        String buffered;
+        synchronized (context.monitor()) {
+            context.lineBuffer().append(chunk);
+            buffered = context.lineBuffer().toString();
+            context.lineBuffer().setLength(0);
+        }
+        String[] lines = buffered.split("\n", -1);
+        String remainder = lines.length == 0 ? "" : lines[lines.length - 1];
+        synchronized (context.monitor()) {
+            context.lineBuffer().append(remainder);
+        }
+        for (int i = 0; i < lines.length - 1; i++) {
+            processOutputLine(context, lines[i]);
+        }
+    }
+
+    private void flushBufferedOutput(AgentSessionContext context) {
+        String trailing;
+        synchronized (context.monitor()) {
+            trailing = context.lineBuffer().toString();
+            context.lineBuffer().setLength(0);
+        }
+        if (StringUtils.hasText(trailing)) {
+            processOutputLine(context, trailing);
+        }
+        finalizePendingAssistantMessage(context);
+    }
+
+    private void processOutputLine(AgentSessionContext context, String rawLine) {
+        String normalizedLine = rawLine == null ? "" : rawLine.replace("\r", "");
+        String trimmedLine = normalizedLine.trim();
+
+        if (!StringUtils.hasText(trimmedLine)) {
+            appendAssistantMessageChunk(context, "\n");
+            return;
+        }
+
+        if (normalizedLine.startsWith("[system]")) {
+            finalizePendingAssistantMessage(context);
+            String systemContent = normalizedLine.replaceFirst("^\\[system]\\s*", "");
+            if (!isInternalSystemMessage(systemContent)) {
+                emitSystemMessage(context, systemContent);
+            }
+            return;
+        }
+
+        if ("🦀 ZeroClaw Interactive Mode".equals(trimmedLine) || "Type /help for commands.".equals(trimmedLine)) {
+            return;
+        }
+
+        if (">".equals(trimmedLine)) {
+            finalizePendingAssistantMessage(context);
+            return;
+        }
+
+        if (trimmedLine.startsWith(">")) {
+            String lineAfterPrompt = trimmedLine.substring(1).trim();
+            if (!StringUtils.hasText(lineAfterPrompt)) {
+                finalizePendingAssistantMessage(context);
+                return;
+            }
+            if (lineAfterPrompt.startsWith("[you]")) {
+                return;
+            }
+            if (isLogLine(lineAfterPrompt) || isMetaLine(lineAfterPrompt)) {
+                return;
+            }
+            appendAssistantMessageChunk(context, lineAfterPrompt + "\n");
+            return;
+        }
+
+        if (isLogLine(trimmedLine)) {
+            if (trimmedLine.contains("turn.complete")) {
+                finalizePendingAssistantMessage(context);
+            }
+            return;
+        }
+
+        if (isMetaLine(trimmedLine)) {
+            return;
+        }
+
+        appendAssistantMessageChunk(context, normalizedLine + "\n");
+    }
+
+    private boolean isLogLine(String line) {
+        if (!StringUtils.hasText(line)) {
+            return false;
+        }
+        String normalized = line.trim();
+        return normalized.contains("zeroclaw::") || normalized.matches("^20\\d{2}-\\d{2}-\\d{2}T.*$");
+    }
+
+    private boolean isMetaLine(String line) {
+        if (!StringUtils.hasText(line)) {
+            return false;
+        }
+        String normalized = line.trim();
+        return normalized.startsWith("The user ")
+                || normalized.startsWith("The user's ")
+                || normalized.startsWith("The user has ")
+                || normalized.startsWith("The user is ")
+                || normalized.startsWith("According to ")
+                || normalized.startsWith("I need to ")
+                || normalized.startsWith("I must ")
+                || normalized.startsWith("I should ")
+                || normalized.startsWith("Let me ")
+                || normalized.startsWith("This is a follow-up")
+                || normalized.startsWith("The keywords")
+                || normalized.startsWith("The input contains");
+    }
+
+    private boolean isInternalSystemMessage(String line) {
+        if (!StringUtils.hasText(line)) {
+            return false;
+        }
+        String normalized = line.trim();
+        return normalized.startsWith("connected:")
+                || normalized.startsWith("agent session ready:")
+                || normalized.startsWith("tip:");
+    }
+
+    private void appendAssistantMessageChunk(AgentSessionContext context, String chunk) {
+        if (chunk == null) {
+            return;
+        }
+        synchronized (context.monitor()) {
+            context.pendingAssistantContent().append(chunk);
+        }
+    }
+
+    private void finalizePendingAssistantMessage(AgentSessionContext context) {
+        String pendingContent;
+        synchronized (context.monitor()) {
+            pendingContent = context.pendingAssistantContent().toString().trim();
+            context.pendingAssistantContent().setLength(0);
+        }
+        if (!StringUtils.hasText(pendingContent)) {
+            return;
+        }
+        ParsedAgentMessage parsedAgentMessage = parseStructuredAgentMessage(pendingContent);
+        String displayContent = StringUtils.hasText(parsedAgentMessage.displayContent())
+                ? parsedAgentMessage.displayContent().trim()
+                : pendingContent;
+        emitMessageFrame(context, "assistant", displayContent, false, parsedAgentMessage.interaction());
+    }
+
+    private ParsedAgentMessage parseStructuredAgentMessage(String content) {
+        String normalized = content == null ? "" : content.replace("\r\n", "\n").trim();
+        if (!StringUtils.hasText(normalized)) {
+            return new ParsedAgentMessage("", null);
+        }
+        Matcher matcher = AGENT_INTERACTION_BLOCK_PATTERN.matcher(normalized);
+        AgentInteraction interaction = null;
+        StringBuffer displayBuffer = new StringBuffer();
+        while (matcher.find()) {
+            AgentInteraction candidate = parseInteraction(matcher.group(1));
+            if (candidate != null && interaction == null) {
+                interaction = candidate;
+                matcher.appendReplacement(displayBuffer, "");
+            } else {
+                matcher.appendReplacement(displayBuffer, Matcher.quoteReplacement(matcher.group()));
+            }
+        }
+        matcher.appendTail(displayBuffer);
+        String displayContent = displayBuffer.toString().trim();
+        if (!StringUtils.hasText(displayContent) && interaction != null && StringUtils.hasText(interaction.title())) {
+            displayContent = interaction.title().trim();
+        }
+        if (!StringUtils.hasText(displayContent)) {
+            displayContent = normalized;
+        }
+        return new ParsedAgentMessage(displayContent, interaction);
+    }
+
+    private AgentInteraction parseInteraction(String rawJson) {
+        if (!StringUtils.hasText(rawJson)) {
+            return null;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(rawJson);
+            String version = textOrDefault(root.get("version"), "1.0");
+            String type = textOrNull(root.get("type"));
+            String stateId = firstNonBlank(
+                    textOrNull(root.get("stateId")),
+                    textOrNull(root.get("state_id"))
+            );
+            String title = textOrNull(root.get("title"));
+            List<AgentInteractionAction> actions = new ArrayList<>();
+            JsonNode actionsNode = root.get("actions");
+            if (actionsNode != null && actionsNode.isArray()) {
+                for (JsonNode node : actionsNode) {
+                    AgentInteractionAction action = parseInteractionAction(node);
+                    if (action != null) {
+                        actions.add(action);
+                    }
+                }
+            }
+            if (!StringUtils.hasText(type) || actions.isEmpty()) {
+                return null;
+            }
+            return new AgentInteraction(version, type.trim(), nullIfBlank(stateId), nullIfBlank(title), List.copyOf(actions));
+        } catch (IOException ignored) {
+            return null;
+        }
+    }
+
+    private AgentInteractionAction parseInteractionAction(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return null;
+        }
+        String id = textOrNull(node.get("id"));
+        String label = textOrNull(node.get("label"));
+        String kind = textOrNull(node.get("kind"));
+        String payload = textOrNull(node.get("payload"));
+        if (!StringUtils.hasText(id)
+                || !StringUtils.hasText(label)
+                || !StringUtils.hasText(kind)
+                || !StringUtils.hasText(payload)) {
+            return null;
+        }
+        String normalizedKind = kind.trim();
+        if (!"send".equals(normalizedKind) && !"prefill".equals(normalizedKind)) {
+            return null;
+        }
+        return new AgentInteractionAction(id.trim(), label.trim(), normalizedKind, payload);
+    }
+
+    private void emitSystemMessage(AgentSessionContext context, String message) {
+        emitMessageFrame(context, "system", message, false, null);
+    }
+
+    private void emitSystemMessage(WebSocketSession session, UUID instanceId, String message) {
+        AgentSessionContext context = new AgentSessionContext(
+                session,
+                null,
+                null,
+                null,
+                instanceId,
+                null
+        );
+        emitMessageFrame(context, "system", message, false, null);
+    }
+
+    private void emitMessageFrame(AgentSessionContext context,
+                                  String role,
+                                  String content,
+                                  boolean pending,
+                                  AgentInteraction interaction) {
+        if (context == null || !context.session().isOpen() || !StringUtils.hasText(content)) {
+            return;
+        }
+        long sequence = context.nextSequence();
+        Instant emittedAt = Instant.now();
+        AgentSessionMessage message = new AgentSessionMessage(
+                "1.0",
+                context.session().getId() + "-" + sequence,
+                context.instanceId(),
+                context.session().getId(),
+                sequence,
+                role,
+                content.trim(),
+                pending,
+                interaction,
+                emittedAt.toString()
+        );
+        AgentSessionFrame frame = new AgentSessionFrame(
+                "1.0",
+                "message",
+                context.instanceId(),
+                context.session().getId(),
+                message,
+                null,
+                emittedAt.toString()
+        );
+        sendFrame(context.session(), frame);
+    }
+
+    private void emitDebugFrame(AgentSessionContext context, String chunk) {
+        if (context == null || !context.session().isOpen() || chunk == null) {
+            return;
+        }
+        Instant emittedAt = Instant.now();
+        AgentSessionFrame frame = new AgentSessionFrame(
+                "1.0",
+                "debug",
+                context.instanceId(),
+                context.session().getId(),
+                null,
+                chunk,
+                emittedAt.toString()
+        );
+        sendFrame(context.session(), frame);
+    }
+
+    private void sendFrame(WebSocketSession session, Object payload) {
+        if (session == null || !session.isOpen() || payload == null) {
             return;
         }
         try {
-            context.stdin().close();
-        } catch (IOException ignored) {
-            // Ignore and continue process teardown.
-        }
-
-        context.process().destroy();
-        try {
-            boolean exited = context.process().waitFor(processShutdownTimeout.toMillis(), TimeUnit.MILLISECONDS);
-            if (!exited) {
-                context.process().destroyForcibly();
+            String text = objectMapper.writeValueAsString(payload);
+            synchronized (session) {
+                session.sendMessage(new TextMessage(text));
             }
-        } catch (InterruptedException ex) {
-            Thread.currentThread().interrupt();
-            context.process().destroyForcibly();
-        }
-
-        Future<?> readerTask = context.readerTask();
-        if (readerTask != null) {
-            readerTask.cancel(true);
+        } catch (IOException ignored) {
+            // Connection may already be closed.
         }
     }
 
@@ -259,21 +555,8 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
-    private void sendSystemMessage(WebSocketSession session, String message) {
-        if (!session.isOpen()) {
-            return;
-        }
-        try {
-            synchronized (session) {
-                session.sendMessage(new TextMessage("[system] " + message + "\n"));
-            }
-        } catch (IOException ignored) {
-            // Connection may already be closed.
-        }
-    }
-
     private void safeClose(WebSocketSession session, CloseStatus status) {
-        if (!session.isOpen()) {
+        if (session == null || !session.isOpen()) {
             return;
         }
         try {
@@ -287,17 +570,124 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
         return ANSI_ESCAPE_PATTERN.matcher(output).replaceAll("");
     }
 
+    private void cleanup(String sessionId) {
+        AgentSessionContext context = contexts.remove(sessionId);
+        if (context == null) {
+            return;
+        }
+        try {
+            if (context.stdin() != null) {
+                context.stdin().close();
+            }
+        } catch (IOException ignored) {
+            // Ignore close failure.
+        }
+        if (context.process() != null) {
+            context.process().destroy();
+            try {
+                boolean exited = context.process().waitFor(processShutdownTimeout.toMillis(), TimeUnit.MILLISECONDS);
+                if (!exited) {
+                    context.process().destroyForcibly();
+                }
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                context.process().destroyForcibly();
+            }
+        }
+
+        Future<?> readerTask = context.readerTask();
+        if (readerTask != null) {
+            readerTask.cancel(true);
+        }
+    }
+
+    private String textOrDefault(JsonNode node, String defaultValue) {
+        String value = textOrNull(node);
+        return StringUtils.hasText(value) ? value.trim() : defaultValue;
+    }
+
+    private String textOrNull(JsonNode node) {
+        if (node == null || node.isNull() || !node.isValueNode()) {
+            return null;
+        }
+        String value = node.asText();
+        return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (StringUtils.hasText(value)) {
+                return value.trim();
+            }
+        }
+        return null;
+    }
+
+    private String nullIfBlank(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private record ParsedAgentMessage(String displayContent, AgentInteraction interaction) {
+    }
+
+    private record AgentInteraction(String version,
+                                    String type,
+                                    String stateId,
+                                    String title,
+                                    List<AgentInteractionAction> actions) {
+    }
+
+    private record AgentInteractionAction(String id, String label, String kind, String payload) {
+    }
+
+    private record AgentSessionMessage(String version,
+                                       String messageId,
+                                       UUID instanceId,
+                                       String sessionId,
+                                       long sequence,
+                                       String role,
+                                       String content,
+                                       boolean pending,
+                                       AgentInteraction interaction,
+                                       String emittedAt) {
+    }
+
+    private record AgentSessionFrame(String version,
+                                     String eventType,
+                                     UUID instanceId,
+                                     String sessionId,
+                                     AgentSessionMessage message,
+                                     String chunk,
+                                     String emittedAt) {
+    }
+
     private static final class AgentSessionContext {
         private final WebSocketSession session;
         private final Process process;
         private final OutputStream stdin;
         private volatile Future<?> readerTask;
+        private final UUID instanceId;
+        private final String containerName;
+        private final Object monitor = new Object();
+        private final StringBuilder lineBuffer = new StringBuilder();
+        private final StringBuilder pendingAssistantContent = new StringBuilder();
+        private long sequence;
 
-        private AgentSessionContext(WebSocketSession session, Process process, OutputStream stdin, Future<?> readerTask) {
+        private AgentSessionContext(WebSocketSession session,
+                                    Process process,
+                                    OutputStream stdin,
+                                    Future<?> readerTask,
+                                    UUID instanceId,
+                                    String containerName) {
             this.session = session;
             this.process = process;
             this.stdin = stdin;
             this.readerTask = readerTask;
+            this.instanceId = instanceId;
+            this.containerName = containerName;
         }
 
         private WebSocketSession session() {
@@ -318,6 +708,34 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
 
         private void setReaderTask(Future<?> readerTask) {
             this.readerTask = readerTask;
+        }
+
+        private UUID instanceId() {
+            return instanceId;
+        }
+
+        @SuppressWarnings("unused")
+        private String containerName() {
+            return containerName;
+        }
+
+        private Object monitor() {
+            return monitor;
+        }
+
+        private StringBuilder lineBuffer() {
+            return lineBuffer;
+        }
+
+        private StringBuilder pendingAssistantContent() {
+            return pendingAssistantContent;
+        }
+
+        private long nextSequence() {
+            synchronized (monitor) {
+                sequence += 1;
+                return sequence;
+            }
         }
     }
 }

@@ -12,6 +12,7 @@
   - `确认第一步` / `确认第二步` / `确认第三步` / `确认第四步` / `确认第五步`
   - `第1步重生成` / `第2步重生成` / `第3步重生成` / `第4步重生成` / `第5步重生成`
   - `workflow_action`
+  - `workflow_action=approve` / `workflow_action=revise` / `stateId`
 
 ## 必须执行
 1. 只调用一次 `delegate`。
@@ -27,6 +28,7 @@
 说明：
 - 纯 JSON 错误对象（如 `{"error": true, "errorMessage": "..."}`）属于“非空文本”，必须原样透传。
 - 交互式单步输出、完整 5 步输出都属于“非空文本”，必须原样透传。
+- 若子 agent 输出包含 `<fun_claw_interaction>...</fun_claw_interaction>` 协议块，属于正文的一部分，必须原样透传，不得删改或重排。
 
 ## 特别约束
 - 对于 `script_type=一句话剧本`，允许并鼓励交互式分步推进（不要求单轮完成 5 步）。
@@ -35,7 +37,7 @@
 ## CLI 单轮调用说明
 - 若使用 `zeroclaw agent -m "..."`
   - 该模式是单轮消息（single-shot），每次调用后回合结束。
-  - 后续“确认第X步/第X步重生成”若未携带上下文字段，子 agent 可能缺少必要输入。
+  - 后续 `workflow_action=approve/revise` 或“确认第X步/第X步重生成”若未携带上下文字段，子 agent 可能缺少必要输入。
 - 若要稳定分步推进，优先使用交互会话：
   - `zeroclaw agent --config-dir /data/zeroclaw`
 - 若必须使用 `-m`，建议每轮都附带：
@@ -43,6 +45,7 @@
   - `script_content`
   - `target_audience`
   - `expected_episode_count`
+  - `stateId`（在确认/修改阶段）
 
 ## 验收失败返回
 仅在“delegate 失败”或“delegate 输出为空”时返回固定错误 JSON（不得透传正文）：
