@@ -7,12 +7,11 @@
 当用户请求中出现任一关键词或字段时，必须进入本规则：
 - 关键词：小说转剧本 / 一句话剧本
 - 字段：script_type / script_content / target_audience / expected_episode_count
-- 交互控制词（任一命中即触发）：
-  - `确认第1步` / `确认第2步` / `确认第3步` / `确认第4步` / `确认第5步`
-  - `确认第一步` / `确认第二步` / `确认第三步` / `确认第四步` / `确认第五步`
-  - `第1步重生成` / `第2步重生成` / `第3步重生成` / `第4步重生成` / `第5步重生成`
-  - `workflow_action`
-  - `workflow_action=approve` / `workflow_action=revise` / `stateId`
+- 交互控制字段（任一命中即触发）：
+  - `interaction_action`
+  - `interaction_action=confirm` / `interaction_action=revise`
+  - `stateId`
+  - `step_feedback` / `user_feedback` / `feedback`
 
 ## 必须执行
 1. 只调用一次 `delegate`。
@@ -27,17 +26,18 @@
 
 说明：
 - 纯 JSON 错误对象（如 `{"error": true, "errorMessage": "..."}`）属于“非空文本”，必须原样透传。
-- 交互式单步输出、完整 5 步输出都属于“非空文本”，必须原样透传。
+- 交互式单状态输出、完整多状态输出都属于“非空文本”，必须原样透传。
 - 若子 agent 输出包含 `<fun_claw_interaction>...</fun_claw_interaction>` 协议块，属于正文的一部分，必须原样透传，不得删改或重排。
+- 若子 agent 输出语义上要求用户继续确认/修改，但缺少 `<fun_claw_interaction>...</fun_claw_interaction>` 协议块，则视为无效输出，按“delegate 输出为空或不合规”处理。
 
 ## 特别约束
-- 对于 `script_type=一句话剧本`，允许并鼓励交互式分步推进（不要求单轮完成 5 步）。
-- 禁止把 `一句话剧本` 判定为“仅需一步生成/无需5步流程”。
+- 对于 `script_type=一句话剧本`，允许并鼓励交互式状态推进（不要求单轮完成 5 步）。
+- 禁止把 `一句话剧本` 判定为“仅需一步生成/无需多轮交互”。
 
 ## CLI 单轮调用说明
 - 若使用 `zeroclaw agent -m "..."`
   - 该模式是单轮消息（single-shot），每次调用后回合结束。
-  - 后续 `workflow_action=approve/revise` 或“确认第X步/第X步重生成”若未携带上下文字段，子 agent 可能缺少必要输入。
+  - 后续 `interaction_action=confirm/revise` 若未携带必要上下文字段，子 agent 可能缺少必要输入。
 - 若要稳定分步推进，优先使用交互会话：
   - `zeroclaw agent --config-dir /data/zeroclaw`
 - 若必须使用 `-m`，建议每轮都附带：
@@ -46,6 +46,7 @@
   - `target_audience`
   - `expected_episode_count`
   - `stateId`（在确认/修改阶段）
+  - `step_feedback`（在修改阶段）
 
 ## 验收失败返回
 仅在“delegate 失败”或“delegate 输出为空”时返回固定错误 JSON（不得透传正文）：
