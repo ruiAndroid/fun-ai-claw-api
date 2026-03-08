@@ -24,6 +24,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -44,6 +45,7 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
     private static final Pattern AGENT_INTERACTION_BLOCK_PATTERN =
             Pattern.compile("(?is)<fun_claw_interaction>\\s*(\\{.*?})\\s*</fun_claw_interaction>");
     private static final Pattern AGENT_ID_PATTERN = Pattern.compile("[A-Za-z0-9_-]+");
+    private static final String AGENT_SESSION_STREAM_PREFIX = "[assistant_delta] ";
 
     private final InstanceRepository instanceRepository;
     private final InstanceAgentService instanceAgentService;
@@ -244,6 +246,11 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
             return;
         }
 
+        if (normalizedLine.startsWith(AGENT_SESSION_STREAM_PREFIX)) {
+            appendAssistantStreamChunk(context, decodeAssistantStreamChunk(context, normalizedLine));
+            return;
+        }
+
         if (normalizedLine.startsWith("[system]")) {
             finalizePendingAssistantMessage(context);
             String systemContent = normalizedLine.replaceFirst("^\\[system]\\s*", "");
@@ -338,11 +345,34 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
+    private void appendAssistantStreamChunk(AgentSessionContext context, String chunk) {
+        if (!StringUtils.hasText(chunk)) {
+            return;
+        }
+        String pendingMessageId;
+        String pendingDisplayContent;
+        synchronized (context.monitor()) {
+            if (!StringUtils.hasText(context.pendingAssistantMessageId())) {
+                context.setPendingAssistantMessageId(context.session().getId() + "-pending-" + UUID.randomUUID());
+            }
+            context.pendingAssistantContent().append(chunk);
+            pendingMessageId = context.pendingAssistantMessageId();
+            pendingDisplayContent = buildPendingAssistantDisplay(context.pendingAssistantContent().toString());
+        }
+        if (!StringUtils.hasText(pendingDisplayContent)) {
+            return;
+        }
+        emitMessageFrame(context, "assistant", pendingDisplayContent, true, null, pendingMessageId);
+    }
+
     private void finalizePendingAssistantMessage(AgentSessionContext context) {
         String pendingContent;
+        String pendingMessageId;
         synchronized (context.monitor()) {
             pendingContent = context.pendingAssistantContent().toString().trim();
             context.pendingAssistantContent().setLength(0);
+            pendingMessageId = context.pendingAssistantMessageId();
+            context.setPendingAssistantMessageId(null);
         }
         if (!StringUtils.hasText(pendingContent)) {
             return;
@@ -351,7 +381,27 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
         String displayContent = StringUtils.hasText(parsedAgentMessage.displayContent())
                 ? parsedAgentMessage.displayContent().trim()
                 : pendingContent;
-        emitMessageFrame(context, "assistant", displayContent, false, parsedAgentMessage.interaction());
+        emitMessageFrame(context, "assistant", displayContent, false, parsedAgentMessage.interaction(), pendingMessageId);
+    }
+
+    private String decodeAssistantStreamChunk(AgentSessionContext context, String line) {
+        String encoded = line.substring(AGENT_SESSION_STREAM_PREFIX.length()).trim();
+        if (!StringUtils.hasText(encoded)) {
+            return "";
+        }
+        try {
+            return new String(Base64.getDecoder().decode(encoded), StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException ex) {
+            emitSystemMessage(context, "failed to decode assistant delta: " + ex.getMessage());
+            return "";
+        }
+    }
+
+    private String buildPendingAssistantDisplay(String content) {
+        String normalized = content == null ? "" : content.replace("\r\n", "\n");
+        int interactionStart = normalized.indexOf("<fun_claw_interaction>");
+        String visibleContent = interactionStart >= 0 ? normalized.substring(0, interactionStart) : normalized;
+        return visibleContent.trim();
     }
 
     private ParsedAgentMessage parseStructuredAgentMessage(String content) {
@@ -456,6 +506,15 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
                                   String content,
                                   boolean pending,
                                   AgentInteraction interaction) {
+        emitMessageFrame(context, role, content, pending, interaction, null);
+    }
+
+    private void emitMessageFrame(AgentSessionContext context,
+                                  String role,
+                                  String content,
+                                  boolean pending,
+                                  AgentInteraction interaction,
+                                  String messageIdOverride) {
         if (context == null || !context.session().isOpen() || !StringUtils.hasText(content)) {
             return;
         }
@@ -463,7 +522,7 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
         Instant emittedAt = Instant.now();
         AgentSessionMessage message = new AgentSessionMessage(
                 "1.0",
-                context.session().getId() + "-" + sequence,
+                StringUtils.hasText(messageIdOverride) ? messageIdOverride.trim() : context.session().getId() + "-" + sequence,
                 context.instanceId(),
                 context.session().getId(),
                 sequence,
@@ -489,6 +548,10 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
         if (context == null || !context.session().isOpen() || chunk == null) {
             return;
         }
+        String debugChunk = stripAssistantDeltaMarkers(chunk);
+        if (!StringUtils.hasText(debugChunk)) {
+            return;
+        }
         Instant emittedAt = Instant.now();
         AgentSessionFrame frame = new AgentSessionFrame(
                 "1.0",
@@ -496,10 +559,29 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
                 context.instanceId(),
                 context.session().getId(),
                 null,
-                chunk,
+                debugChunk,
                 emittedAt.toString()
         );
         sendFrame(context.session(), frame);
+    }
+
+    private String stripAssistantDeltaMarkers(String chunk) {
+        if (!StringUtils.hasText(chunk) || !chunk.contains(AGENT_SESSION_STREAM_PREFIX)) {
+            return chunk;
+        }
+        String normalized = chunk.replace("\r\n", "\n");
+        String[] lines = normalized.split("\n", -1);
+        StringBuilder builder = new StringBuilder();
+        for (String line : lines) {
+            if (line.startsWith(AGENT_SESSION_STREAM_PREFIX)) {
+                continue;
+            }
+            if (builder.length() > 0) {
+                builder.append('\n');
+            }
+            builder.append(line);
+        }
+        return builder.toString().trim();
     }
 
     private void sendFrame(WebSocketSession session, Object payload) {
@@ -667,6 +749,7 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
         addContainerEnv(command, "LANG", lang);
         addContainerEnv(command, "LC_ALL", lcAll);
         addContainerEnv(command, "RUST_LOG", rustLog);
+        addContainerEnv(command, "ZEROCLAW_AGENT_SESSION_STREAM", "1");
         command.add(containerName);
         command.addAll(agentCommandParts);
         if (StringUtils.hasText(agentId)) {
@@ -866,6 +949,7 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
         private final Object monitor = new Object();
         private final StringBuilder lineBuffer = new StringBuilder();
         private final StringBuilder pendingAssistantContent = new StringBuilder();
+        private String pendingAssistantMessageId;
         private long sequence;
 
         private AgentSessionContext(WebSocketSession session,
@@ -921,6 +1005,14 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
 
         private StringBuilder pendingAssistantContent() {
             return pendingAssistantContent;
+        }
+
+        private String pendingAssistantMessageId() {
+            return pendingAssistantMessageId;
+        }
+
+        private void setPendingAssistantMessageId(String pendingAssistantMessageId) {
+            this.pendingAssistantMessageId = pendingAssistantMessageId;
         }
 
         private long nextSequence() {
