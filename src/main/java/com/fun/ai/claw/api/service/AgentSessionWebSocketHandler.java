@@ -281,6 +281,14 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
                 finalizePendingAssistantMessage(context);
                 return;
             }
+            if (lineAfterPrompt.startsWith(AGENT_SESSION_STREAM_PREFIX)) {
+                appendAssistantStreamChunk(context, decodeAssistantStreamChunk(context, lineAfterPrompt));
+                return;
+            }
+            if (AGENT_SESSION_STREAM_CLEAR_PREFIX.equals(lineAfterPrompt)) {
+                clearPendingAssistantStream(context);
+                return;
+            }
             if (lineAfterPrompt.startsWith("[you]")) {
                 return;
             }
@@ -589,7 +597,10 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
         String[] lines = normalized.split("\n", -1);
         StringBuilder builder = new StringBuilder();
         for (String line : lines) {
-            if (line.startsWith(AGENT_SESSION_STREAM_PREFIX) || line.startsWith(AGENT_SESSION_STREAM_CLEAR_PREFIX)) {
+            String trimmedLine = line.trim();
+            String promptStrippedLine = trimmedLine.startsWith(">") ? trimmedLine.substring(1).trim() : trimmedLine;
+            if (promptStrippedLine.startsWith(AGENT_SESSION_STREAM_PREFIX)
+                    || AGENT_SESSION_STREAM_CLEAR_PREFIX.equals(promptStrippedLine)) {
                 continue;
             }
             if (builder.length() > 0) {
