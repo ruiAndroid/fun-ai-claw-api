@@ -46,6 +46,7 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
             Pattern.compile("(?is)<fun_claw_interaction>\\s*(\\{.*?})\\s*</fun_claw_interaction>");
     private static final Pattern AGENT_ID_PATTERN = Pattern.compile("[A-Za-z0-9_-]+");
     private static final String AGENT_SESSION_STREAM_PREFIX = "[assistant_delta] ";
+    private static final String AGENT_SESSION_STREAM_CLEAR_PREFIX = "[assistant_clear]";
 
     private final InstanceRepository instanceRepository;
     private final InstanceAgentService instanceAgentService;
@@ -251,6 +252,11 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
             return;
         }
 
+        if (AGENT_SESSION_STREAM_CLEAR_PREFIX.equals(trimmedLine)) {
+            clearPendingAssistantStream(context);
+            return;
+        }
+
         if (normalizedLine.startsWith("[system]")) {
             finalizePendingAssistantMessage(context);
             String systemContent = normalizedLine.replaceFirst("^\\[system]\\s*", "");
@@ -363,6 +369,15 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
             return;
         }
         emitMessageFrame(context, "assistant", pendingDisplayContent, true, null, pendingMessageId);
+    }
+
+    private void clearPendingAssistantStream(AgentSessionContext context) {
+        if (context == null) {
+            return;
+        }
+        synchronized (context.monitor()) {
+            context.pendingAssistantContent().setLength(0);
+        }
     }
 
     private void finalizePendingAssistantMessage(AgentSessionContext context) {
@@ -566,14 +581,15 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
     }
 
     private String stripAssistantDeltaMarkers(String chunk) {
-        if (!StringUtils.hasText(chunk) || !chunk.contains(AGENT_SESSION_STREAM_PREFIX)) {
+        if (!StringUtils.hasText(chunk)
+                || (!chunk.contains(AGENT_SESSION_STREAM_PREFIX) && !chunk.contains(AGENT_SESSION_STREAM_CLEAR_PREFIX))) {
             return chunk;
         }
         String normalized = chunk.replace("\r\n", "\n");
         String[] lines = normalized.split("\n", -1);
         StringBuilder builder = new StringBuilder();
         for (String line : lines) {
-            if (line.startsWith(AGENT_SESSION_STREAM_PREFIX)) {
+            if (line.startsWith(AGENT_SESSION_STREAM_PREFIX) || line.startsWith(AGENT_SESSION_STREAM_CLEAR_PREFIX)) {
                 continue;
             }
             if (builder.length() > 0) {
