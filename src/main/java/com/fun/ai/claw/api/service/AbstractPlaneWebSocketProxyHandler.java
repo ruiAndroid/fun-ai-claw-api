@@ -59,7 +59,7 @@ abstract class AbstractPlaneWebSocketProxyHandler extends AbstractWebSocketHandl
 
         CompletableFuture<WebSocketSession> upstreamFuture = webSocketClient.execute(
                 new UpstreamBridgeHandler(clientSession.getId()),
-                copyHandshakeHeaders(clientSession.getHandshakeHeaders()),
+                copyHandshakeHeaders(resolveHandshakeHeaders(clientSession)),
                 buildTargetUri(clientSession.getUri())
         );
         context.setUpstreamFuture(upstreamFuture);
@@ -69,6 +69,14 @@ abstract class AbstractPlaneWebSocketProxyHandler extends AbstractWebSocketHandl
                         closeAndCleanup(clientSession.getId(), CloseStatus.SERVER_ERROR);
                     }
                 });
+    }
+
+    private HttpHeaders resolveHandshakeHeaders(WebSocketSession session) {
+        Object snapshot = session.getAttributes().get(WebSocketHandshakeSnapshotInterceptor.ATTR_HANDSHAKE_HEADERS);
+        if (snapshot instanceof HttpHeaders headers) {
+            return headers;
+        }
+        return HttpHeaders.copyOf(session.getHandshakeHeaders());
     }
 
     @Override

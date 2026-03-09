@@ -4,6 +4,7 @@ import com.fun.ai.claw.api.service.AgentSessionWebSocketHandler;
 import com.fun.ai.claw.api.service.TerminalWebSocketHandler;
 import com.fun.ai.claw.api.service.UiControllerHandshakeSnapshotInterceptor;
 import com.fun.ai.claw.api.service.UiControllerWebSocketProxyHandler;
+import com.fun.ai.claw.api.service.WebSocketHandshakeSnapshotInterceptor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
@@ -17,23 +18,28 @@ public class TerminalWebSocketConfig implements WebSocketConfigurer {
     private final TerminalWebSocketHandler terminalWebSocketHandler;
     private final UiControllerWebSocketProxyHandler uiControllerWebSocketProxyHandler;
     private final UiControllerHandshakeSnapshotInterceptor uiControllerHandshakeSnapshotInterceptor;
+    private final WebSocketHandshakeSnapshotInterceptor webSocketHandshakeSnapshotInterceptor;
 
     public TerminalWebSocketConfig(AgentSessionWebSocketHandler agentSessionWebSocketHandler,
                                    TerminalWebSocketHandler terminalWebSocketHandler,
                                    UiControllerWebSocketProxyHandler uiControllerWebSocketProxyHandler,
-                                   UiControllerHandshakeSnapshotInterceptor uiControllerHandshakeSnapshotInterceptor) {
+                                   UiControllerHandshakeSnapshotInterceptor uiControllerHandshakeSnapshotInterceptor,
+                                   WebSocketHandshakeSnapshotInterceptor webSocketHandshakeSnapshotInterceptor) {
         this.agentSessionWebSocketHandler = agentSessionWebSocketHandler;
         this.terminalWebSocketHandler = terminalWebSocketHandler;
         this.uiControllerWebSocketProxyHandler = uiControllerWebSocketProxyHandler;
         this.uiControllerHandshakeSnapshotInterceptor = uiControllerHandshakeSnapshotInterceptor;
+        this.webSocketHandshakeSnapshotInterceptor = webSocketHandshakeSnapshotInterceptor;
     }
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         registry.addHandler(agentSessionWebSocketHandler, "/v1/agent-session/ws")
+                .addInterceptors(webSocketHandshakeSnapshotInterceptor)
                 .setAllowedOriginPatterns("*");
 
         registry.addHandler(terminalWebSocketHandler, "/v1/terminal/ws")
+                .addInterceptors(webSocketHandshakeSnapshotInterceptor)
                 .setAllowedOriginPatterns("*");
 
         registry.addHandler(
