@@ -383,34 +383,43 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
         if (!StringUtils.hasText(chunk)) {
             return;
         }
+        String pendingMessageId;
         synchronized (context.monitor()) {
             if (!StringUtils.hasText(context.pendingAssistantMessageId())) {
                 context.setPendingAssistantMessageId(context.session().getId() + "-pending-" + UUID.randomUUID());
             }
             context.pendingAssistantContent().append(chunk);
+            pendingMessageId = context.pendingAssistantMessageId();
         }
-        emitPendingAssistantMessageFrame(context);
+        emitDeltaFrame(context, "assistant", pendingMessageId, "content", "append", chunk);
     }
 
     private void appendAssistantThinkingStreamChunk(AgentSessionContext context, String chunk) {
         if (!StringUtils.hasText(chunk)) {
             return;
         }
+        String pendingMessageId;
         synchronized (context.monitor()) {
             if (!StringUtils.hasText(context.pendingAssistantMessageId())) {
                 context.setPendingAssistantMessageId(context.session().getId() + "-pending-" + UUID.randomUUID());
             }
             context.pendingAssistantThinkingContent().append(chunk);
+            pendingMessageId = context.pendingAssistantMessageId();
         }
-        emitPendingAssistantMessageFrame(context);
+        emitDeltaFrame(context, "assistant", pendingMessageId, "thinking", "append", chunk);
     }
 
     private void clearPendingAssistantStream(AgentSessionContext context) {
         if (context == null) {
             return;
         }
+        String pendingMessageId;
         synchronized (context.monitor()) {
             context.pendingAssistantContent().setLength(0);
+            pendingMessageId = context.pendingAssistantMessageId();
+        }
+        if (StringUtils.hasText(pendingMessageId)) {
+            emitDeltaFrame(context, "assistant", pendingMessageId, "content", "clear", null);
         }
     }
 
@@ -418,8 +427,13 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
         if (context == null) {
             return;
         }
+        String pendingMessageId;
         synchronized (context.monitor()) {
             context.pendingAssistantThinkingContent().setLength(0);
+            pendingMessageId = context.pendingAssistantMessageId();
+        }
+        if (StringUtils.hasText(pendingMessageId)) {
+            emitDeltaFrame(context, "assistant", pendingMessageId, "thinking", "clear", null);
         }
     }
 
@@ -647,6 +661,51 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
                 context.session().getId(),
                 message,
                 null,
+                null,
+                emittedAt.toString()
+        );
+        sendFrame(context.session(), frame);
+    }
+
+    private void emitDeltaFrame(AgentSessionContext context,
+                                String role,
+                                String messageId,
+                                String channel,
+                                String operation,
+                                String chunk) {
+        if (context == null
+                || !context.session().isOpen()
+                || !StringUtils.hasText(messageId)
+                || !StringUtils.hasText(role)
+                || !StringUtils.hasText(channel)
+                || !StringUtils.hasText(operation)) {
+            return;
+        }
+        if ("append".equals(operation) && !StringUtils.hasText(chunk)) {
+            return;
+        }
+        long sequence = context.nextSequence();
+        Instant emittedAt = Instant.now();
+        AgentSessionDelta delta = new AgentSessionDelta(
+                "1.0",
+                messageId.trim(),
+                context.instanceId(),
+                context.session().getId(),
+                sequence,
+                role.trim(),
+                channel.trim(),
+                operation.trim(),
+                nullIfBlank(chunk),
+                emittedAt.toString()
+        );
+        AgentSessionFrame frame = new AgentSessionFrame(
+                "1.0",
+                "delta",
+                context.instanceId(),
+                context.session().getId(),
+                null,
+                delta,
+                null,
                 emittedAt.toString()
         );
         sendFrame(context.session(), frame);
@@ -666,6 +725,7 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
                 "debug",
                 context.instanceId(),
                 context.session().getId(),
+                null,
                 null,
                 debugChunk,
                 emittedAt.toString()
@@ -725,6 +785,9 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
             if (frame.message() != null) {
                 values.put("message", toJsonValue(frame.message()));
             }
+            if (frame.delta() != null) {
+                values.put("delta", toJsonValue(frame.delta()));
+            }
             if (frame.chunk() != null) {
                 values.put("chunk", frame.chunk());
             }
@@ -748,6 +811,22 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
                 values.put("thinkingContent", message.thinkingContent());
             }
             values.put("emittedAt", message.emittedAt());
+            return values;
+        }
+        if (payload instanceof AgentSessionDelta delta) {
+            Map<String, Object> values = new LinkedHashMap<>();
+            values.put("version", delta.version());
+            values.put("messageId", delta.messageId());
+            values.put("instanceId", delta.instanceId() == null ? null : delta.instanceId().toString());
+            values.put("sessionId", delta.sessionId());
+            values.put("sequence", delta.sequence());
+            values.put("role", delta.role());
+            values.put("channel", delta.channel());
+            values.put("operation", delta.operation());
+            if (delta.chunk() != null) {
+                values.put("chunk", delta.chunk());
+            }
+            values.put("emittedAt", delta.emittedAt());
             return values;
         }
         if (payload instanceof AgentInteraction interaction) {
@@ -1051,11 +1130,24 @@ public class AgentSessionWebSocketHandler extends TextWebSocketHandler {
                                        String emittedAt) {
     }
 
+    private record AgentSessionDelta(String version,
+                                     String messageId,
+                                     UUID instanceId,
+                                     String sessionId,
+                                     long sequence,
+                                     String role,
+                                     String channel,
+                                     String operation,
+                                     String chunk,
+                                     String emittedAt) {
+    }
+
     private record AgentSessionFrame(String version,
                                      String eventType,
                                      UUID instanceId,
                                      String sessionId,
                                      AgentSessionMessage message,
+                                     AgentSessionDelta delta,
                                      String chunk,
                                      String emittedAt) {
     }
