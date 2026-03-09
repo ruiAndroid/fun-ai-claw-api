@@ -3,6 +3,7 @@ package com.fun.ai.claw.api.service;
 import com.fun.ai.claw.api.model.AgentDescriptorResponse;
 import com.fun.ai.claw.api.model.AgentSystemPromptResponse;
 import com.fun.ai.claw.api.model.InstanceActionType;
+import com.fun.ai.claw.api.model.PairingCodeResponse;
 import com.fun.ai.claw.api.model.SkillDescriptorResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -12,9 +13,11 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClientResponseException;
+import org.springframework.web.util.UriComponentsBuilder;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.net.http.HttpClient;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
@@ -190,6 +193,79 @@ public class PlaneClient {
                             + (StringUtils.hasText(ex.getMessage()) ? " (" + ex.getMessage() + ")" : "")
             );
         }
+    }
+
+    public PairingCodeResponse getPairingCode(UUID instanceId) {
+        try {
+            PairingCodeResponse response = restClient.get()
+                    .uri(planeBaseUrl + "/instances/{instanceId}/pairing-code", instanceId)
+                    .retrieve()
+                    .body(PairingCodeResponse.class);
+            if (response == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "plane returned empty response");
+            }
+            return response;
+        } catch (RestClientResponseException ex) {
+            throw mapPlaneQueryFailure("plane pairing code failed", ex);
+        } catch (ResourceAccessException ex) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_GATEWAY,
+                    "plane service unavailable: " + planeBaseUrl + "/instances/" + instanceId + "/pairing-code"
+                            + (StringUtils.hasText(ex.getMessage()) ? " (" + ex.getMessage() + ")" : "")
+            );
+        }
+    }
+
+    public String readRuntimeFileText(UUID instanceId, String path) {
+        try {
+            byte[] response = restClient.get()
+                    .uri(buildRuntimeFileUri(instanceId, path, null))
+                    .retrieve()
+                    .body(byte[].class);
+            if (response == null) {
+                return null;
+            }
+            return new String(response, StandardCharsets.UTF_8);
+        } catch (RestClientResponseException ex) {
+            if (ex.getStatusCode().value() == 404) {
+                return null;
+            }
+            throw mapPlaneQueryFailure("plane runtime file read failed", ex);
+        } catch (ResourceAccessException ex) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_GATEWAY,
+                    "plane service unavailable: " + buildRuntimeFileUri(instanceId, path, null)
+                            + (StringUtils.hasText(ex.getMessage()) ? " (" + ex.getMessage() + ")" : "")
+            );
+        }
+    }
+
+    public void writeRuntimeFile(UUID instanceId, String path, byte[] content, boolean overwrite) {
+        try {
+            restClient.put()
+                    .uri(buildRuntimeFileUri(instanceId, path, overwrite))
+                    .body(content == null ? new byte[0] : content)
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (RestClientResponseException ex) {
+            throw mapPlaneQueryFailure("plane runtime file write failed", ex);
+        } catch (ResourceAccessException ex) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_GATEWAY,
+                    "plane service unavailable: " + buildRuntimeFileUri(instanceId, path, overwrite)
+                            + (StringUtils.hasText(ex.getMessage()) ? " (" + ex.getMessage() + ")" : "")
+            );
+        }
+    }
+
+    private String buildRuntimeFileUri(UUID instanceId, String path, Boolean overwrite) {
+        UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(planeBaseUrl)
+                .path("/instances/{instanceId}/files")
+                .queryParam("path", path);
+        if (overwrite != null) {
+            builder.queryParam("overwrite", overwrite);
+        }
+        return builder.buildAndExpand(instanceId).toUriString();
     }
 
     private ResponseStatusException mapPlaneQueryFailure(String operation, RestClientResponseException ex) {

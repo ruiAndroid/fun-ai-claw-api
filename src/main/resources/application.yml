@@ -25,6 +25,7 @@ app:
     requested-by: ${PLANE_REQUESTED_BY:fun-ai-claw-api}
     connect-timeout-seconds: ${PLANE_CONNECT_TIMEOUT_SECONDS:3}
     request-timeout-seconds: ${PLANE_REQUEST_TIMEOUT_SECONDS:90}
+    ws-connect-timeout-seconds: ${PLANE_WS_CONNECT_TIMEOUT_SECONDS:10}
   gateway:
     port-range-start: ${GATEWAY_PORT_RANGE_START:42617}
     port-range-end: ${GATEWAY_PORT_RANGE_END:42717}
@@ -42,32 +43,6 @@ app:
     fixed-link-path: /
     auto-auth-query-param: autoAuth
     auth-token-query-param: authToken
-  instance-agents:
-    docker-command: ${INSTANCE_AGENTS_DOCKER_COMMAND:docker}
-    container-prefix: ${INSTANCE_AGENTS_CONTAINER_PREFIX:funclaw}
-    config-path: ${INSTANCE_AGENTS_CONFIG_PATH:/data/zeroclaw/config.toml}
-    command-timeout-seconds: ${INSTANCE_AGENTS_COMMAND_TIMEOUT_SECONDS:8}
-  instance-skills:
-    docker-command: ${INSTANCE_SKILLS_DOCKER_COMMAND:docker}
-    container-prefix: ${INSTANCE_SKILLS_CONTAINER_PREFIX:funclaw}
-    config-path: ${INSTANCE_SKILLS_CONFIG_PATH:/data/zeroclaw/config.toml}
-    fallback-skill-dirs:
-      - /zeroclaw-data/workspace/skills
-      - /workspace/agent-mgc-novel-script/skills
-    command-timeout-seconds: ${INSTANCE_SKILLS_COMMAND_TIMEOUT_SECONDS:8}
-  agent-session:
-    docker-command: ${AGENT_SESSION_DOCKER_COMMAND:docker}
-    container-prefix: ${AGENT_SESSION_CONTAINER_PREFIX:funclaw}
-    command: ${AGENT_SESSION_COMMAND:zeroclaw agent --config-dir /data/zeroclaw}
-    lang: ${AGENT_SESSION_LANG:C.UTF-8}
-    lc-all: ${AGENT_SESSION_LC_ALL:C.UTF-8}
-    rust-log: ${AGENT_SESSION_RUST_LOG:info}
-    process-shutdown-timeout-seconds: ${AGENT_SESSION_PROCESS_SHUTDOWN_TIMEOUT_SECONDS:4}
-  terminal:
-    docker-command: ${TERMINAL_DOCKER_COMMAND:docker}
-    container-prefix: ${TERMINAL_CONTAINER_PREFIX:funclaw}
-    shell: ${TERMINAL_SHELL:/bin/busybox sh}
-    process-shutdown-timeout-seconds: ${TERMINAL_PROCESS_SHUTDOWN_TIMEOUT_SECONDS:2}
   agent-guidance:
     # Preferred global fallback source on API host (optional).
     default-main-agents-md-path: /opt/fun-ai-claw-api/config/main-AGENTS.md

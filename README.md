@@ -34,6 +34,7 @@ Schema is auto-initialized at startup via `src/main/resources/schema.sql`.
 - `POST /v1/instances/{instanceId}/actions`
 - `GET /v1/instances/{instanceId}/pairing-code`
 - `GET /v1/instances/{instanceId}/agents`
+- `GET /v1/instances/{instanceId}/skills`
 - `GET /v1/instances/{instanceId}/main-agent-guidance`
 - `PUT /v1/instances/{instanceId}/main-agent-guidance`
 - `DELETE /v1/instances/{instanceId}/main-agent-guidance`
@@ -60,19 +61,17 @@ app:
 - `POST /v1/instances` returns `409 Conflict` if instance name already exists (case-insensitive).
 - `DELETE /v1/instances/{instanceId}` removes the instance and its action history.
 - API calls plane service for real execution. Configure:
-  - `PLANE_BASE_URL` (default: `http://127.0.0.1:8090/internal/v1`)
+- `PLANE_BASE_URL` (default: `http://127.0.0.1:8090/internal/v1`)
   - `PLANE_REQUESTED_BY` (default: `fun-ai-claw-api`)
+- `PLANE_WS_CONNECT_TIMEOUT_SECONDS` (default: `10`)
 - Runtime metadata endpoints such as `GET /v1/instances/{instanceId}/agents`, `GET /v1/instances/{instanceId}/agents/{agentId}/system-prompt`, and `GET /v1/instances/{instanceId}/skills` are also served through plane, so split deployments no longer need local Docker access on the API host for these reads.
+- Runtime interaction endpoints now proxy through plane as well:
+  - `GET /v1/instances/{instanceId}/pairing-code`
+  - `WS /v1/agent-session/ws`
+  - `WS /v1/terminal/ws`
+  - UI-controller config fallback / masked `api_keys` restore
 - Instance main-agent guidance is stored in DB table `instance_main_prompt`.
-- Agent Session websocket launches interactive `zeroclaw agent` inside the target container and keeps multi-turn confirmation context until the client disconnects.
-- Agent Session defaults can be adjusted with:
-  - `AGENT_SESSION_DOCKER_COMMAND`
-  - `AGENT_SESSION_CONTAINER_PREFIX`
-  - `AGENT_SESSION_COMMAND`
-  - `AGENT_SESSION_LANG`
-  - `AGENT_SESSION_LC_ALL`
-  - `AGENT_SESSION_RUST_LOG`
-  - `AGENT_SESSION_PROCESS_SHUTDOWN_TIMEOUT_SECONDS`
+- Agent-session and terminal runtime defaults now belong on the plane host instead of the API host.
 - Runtime sync resolution priority on START/RESTART/ROLLBACK:
   1. Instance override (`enabled=true`)
   2. Global fallback file (`app.agent-guidance.default-main-agents-md-path`)

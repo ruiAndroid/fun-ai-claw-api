@@ -2,6 +2,7 @@ package com.fun.ai.claw.api.controller;
 
 import com.fun.ai.claw.api.model.ClawInstanceDto;
 import com.fun.ai.claw.api.repository.InstanceRepository;
+import com.fun.ai.claw.api.service.PlaneClient;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
@@ -19,10 +20,8 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -36,7 +35,6 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.StringJoiner;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -85,47 +83,40 @@ public class UiControllerProxyController {
     );
 
     private final InstanceRepository instanceRepository;
+    private final PlaneClient planeClient;
     private final HttpClient httpClient;
     private final String upstreamScheme;
     private final String upstreamHost;
     private final Duration requestTimeout;
     private final boolean forceConfigPathOnSave;
-    private final String dockerCommand;
-    private final String containerPrefix;
     private final boolean configSaveFallbackEnabled;
     private final String configSaveFallbackPath;
-    private final Duration commandTimeout;
     private final String autoAuthQueryParam;
     private final String authTokenQueryParam;
     private final int upstreamRetryAttempts;
     private final long upstreamRetryDelayMillis;
 
     public UiControllerProxyController(InstanceRepository instanceRepository,
+                                       PlaneClient planeClient,
                                        @Value("${app.ui-controller.upstream-scheme:http}") String upstreamScheme,
                                        @Value("${app.ui-controller.upstream-host:127.0.0.1}") String upstreamHost,
                                        @Value("${app.ui-controller.request-timeout-seconds:60}") long requestTimeoutSeconds,
                                        @Value("${app.ui-controller.force-config-path-on-save:true}") boolean forceConfigPathOnSave,
-                                       @Value("${app.ui-controller.docker-command:docker}") String dockerCommand,
-                                       @Value("${app.ui-controller.container-prefix:funclaw}") String containerPrefix,
                                        @Value("${app.ui-controller.config-save-fallback-enabled:true}") boolean configSaveFallbackEnabled,
                                        @Value("${app.ui-controller.config-save-fallback-path:/data/zeroclaw/config.toml}") String configSaveFallbackPath,
-                                       @Value("${app.ui-controller.command-timeout-seconds:15}") long commandTimeoutSeconds,
                                        @Value("${app.ui-controller.upstream-retry-attempts:8}") int upstreamRetryAttempts,
                                        @Value("${app.ui-controller.upstream-retry-delay-millis:300}") long upstreamRetryDelayMillis,
                                        @Value("${app.pairing-code.auto-auth-query-param:autoAuth}") String autoAuthQueryParam,
                                        @Value("${app.pairing-code.auth-token-query-param:authToken}") String authTokenQueryParam) {
         this.instanceRepository = instanceRepository;
+        this.planeClient = planeClient;
         this.upstreamScheme = normalizeScheme(upstreamScheme);
         this.upstreamHost = requireHost(upstreamHost);
         long timeoutSeconds = requestTimeoutSeconds > 0 ? requestTimeoutSeconds : 60;
         this.requestTimeout = Duration.ofSeconds(timeoutSeconds);
         this.forceConfigPathOnSave = forceConfigPathOnSave;
-        this.dockerCommand = dockerCommand;
-        this.containerPrefix = containerPrefix;
         this.configSaveFallbackEnabled = configSaveFallbackEnabled;
         this.configSaveFallbackPath = configSaveFallbackPath;
-        long commandSeconds = commandTimeoutSeconds > 0 ? commandTimeoutSeconds : 15;
-        this.commandTimeout = Duration.ofSeconds(commandSeconds);
         this.upstreamRetryAttempts = upstreamRetryAttempts > 0 ? upstreamRetryAttempts : 1;
         this.upstreamRetryDelayMillis = Math.max(upstreamRetryDelayMillis, 0L);
         this.autoAuthQueryParam = StringUtils.hasText(autoAuthQueryParam) ? autoAuthQueryParam.trim() : "autoAuth";
@@ -133,10 +124,8 @@ public class UiControllerProxyController {
         this.httpClient = HttpClient.newBuilder()
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .build();
-        log.info("ui proxy config-save fallback enabled={}, dockerCommand={}, containerPrefix={}, fallbackPath={}, upstreamRetryAttempts={}, upstreamRetryDelayMillis={}",
+        log.info("ui proxy config-save fallback enabled={}, fallbackPath={}, upstreamRetryAttempts={}, upstreamRetryDelayMillis={}",
                 this.configSaveFallbackEnabled,
-                this.dockerCommand,
-                this.containerPrefix,
                 this.configSaveFallbackPath,
                 this.upstreamRetryAttempts,
                 this.upstreamRetryDelayMillis);
@@ -452,7 +441,7 @@ public class UiControllerProxyController {
     }
 
     private boolean saveConfigFileToContainer(UUID instanceId, byte[] configBytes) {
-        if (!StringUtils.hasText(configSaveFallbackPath) || !StringUtils.hasText(containerPrefix)) {
+        if (!StringUtils.hasText(configSaveFallbackPath)) {
             return false;
         }
         String path = configSaveFallbackPath.trim();
@@ -461,72 +450,14 @@ public class UiControllerProxyController {
             log.warn("ui proxy fallback save skipped: invalid config path {}", path);
             return false;
         }
-        String directory = path.substring(0, lastSlash);
-        String containerName = containerPrefix.trim() + "-" + instanceId;
-
-        CommandResult mkdirResult = runProcess(List.of(
-                dockerCommand,
-                "exec",
-                containerName,
-                "/bin/busybox",
-                "mkdir",
-                "-p",
-                directory
-        ), null);
-        if (mkdirResult.exitCode != 0) {
-            log.warn("ui proxy fallback mkdir failed for {}: {}", containerName, mkdirResult.output);
-            return false;
-        }
-
-        CommandResult writeResult = runProcess(List.of(
-                dockerCommand,
-                "exec",
-                "-i",
-                containerName,
-                "/bin/busybox",
-                "dd",
-                "of=" + path,
-                "conv=fsync"
-        ), configBytes);
-        if (writeResult.exitCode != 0) {
-            log.warn("ui proxy fallback write failed for {}: {}", containerName, writeResult.output);
-            return false;
-        }
-        log.info("ui proxy fallback saved config directly to container {} at {}", containerName, path);
-        return true;
-    }
-
-    private CommandResult runProcess(List<String> command, byte[] stdinBytes) {
-        ProcessBuilder builder = new ProcessBuilder(command);
-        builder.redirectErrorStream(true);
         try {
-            Process process = builder.start();
-            if (stdinBytes != null && stdinBytes.length > 0) {
-                try (OutputStream os = process.getOutputStream()) {
-                    os.write(stdinBytes);
-                    os.flush();
-                }
-            } else {
-                process.getOutputStream().close();
-            }
-
-            ByteArrayOutputStream output = new ByteArrayOutputStream();
-            process.getInputStream().transferTo(output);
-            boolean finished = process.waitFor(commandTimeout.toMillis(), TimeUnit.MILLISECONDS);
-            if (!finished) {
-                process.destroyForcibly();
-                return new CommandResult(124, "command timed out");
-            }
-            return new CommandResult(process.exitValue(), output.toString(StandardCharsets.UTF_8));
-        } catch (IOException ex) {
-            return new CommandResult(1, "io error: " + ex.getMessage());
-        } catch (InterruptedException ex) {
-            Thread.currentThread().interrupt();
-            return new CommandResult(130, "interrupted");
+            planeClient.writeRuntimeFile(instanceId, path, configBytes, true);
+        } catch (RuntimeException ex) {
+            log.warn("ui proxy fallback write failed for {}: {}", instanceId, ex.getMessage());
+            return false;
         }
-    }
-
-    private record CommandResult(int exitCode, String output) {
+        log.info("ui proxy fallback saved config through plane for instance {} at {}", instanceId, path);
+        return true;
     }
 
     private HttpRequest buildOutboundRequest(HttpServletRequest inboundRequest, byte[] requestBody, URI targetUri) {
@@ -750,23 +681,15 @@ public class UiControllerProxyController {
     }
 
     private String readCurrentConfigFromContainer(UUID instanceId) {
-        if (!StringUtils.hasText(containerPrefix) || !StringUtils.hasText(configSaveFallbackPath)) {
+        if (!StringUtils.hasText(configSaveFallbackPath)) {
             return null;
         }
-        String containerName = containerPrefix.trim() + "-" + instanceId;
         String configPath = configSaveFallbackPath.trim();
-        CommandResult readResult = runProcess(List.of(
-                dockerCommand,
-                "exec",
-                containerName,
-                "/bin/busybox",
-                "cat",
-                configPath
-        ), null);
-        if (readResult.exitCode != 0 || !StringUtils.hasText(readResult.output)) {
+        String configText = planeClient.readRuntimeFileText(instanceId, configPath);
+        if (!StringUtils.hasText(configText)) {
             return null;
         }
-        return readResult.output;
+        return configText;
     }
 
     private List<String> extractApiKeys(String toml) {
