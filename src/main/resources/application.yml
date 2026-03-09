@@ -21,7 +21,7 @@ app:
   cors:
     allowed-origins: https://studio.fun.tv
   plane:
-    base-url: ${PLANE_BASE_URL:http://172.21.138.108:8090/internal/v1}
+    base-url: ${PLANE_BASE_URL:http://127.0.0.1:8090/internal/v1}
     requested-by: ${PLANE_REQUESTED_BY:fun-ai-claw-api}
     connect-timeout-seconds: ${PLANE_CONNECT_TIMEOUT_SECONDS:3}
     request-timeout-seconds: ${PLANE_REQUEST_TIMEOUT_SECONDS:90}
@@ -30,10 +30,10 @@ app:
     port-range-end: ${GATEWAY_PORT_RANGE_END:42717}
     url-template: ${GATEWAY_URL_TEMPLATE:http://8.152.159.249:80/fun-claw/ui-controller/{instanceId}}
   remote-connect:
-    command-template: ${REMOTE_CONNECT_COMMAND_TEMPLATE:ssh root@172.21.138.108 "docker exec -it funclaw-{instanceId} /bin/busybox sh"}
+    command-template:  ${REMOTE_CONNECT_COMMAND_TEMPLATE:ssh root@8.152.159.249 "docker exec -it funclaw-{instanceId} /bin/busybox sh"}
   ui-controller:
     upstream-scheme: ${UI_CONTROLLER_UPSTREAM_SCHEME:http}
-    upstream-host: ${UI_CONTROLLER_UPSTREAM_HOST:172.21.138.108}
+    upstream-host: ${UI_CONTROLLER_UPSTREAM_HOST:127.0.0.1}
     request-timeout-seconds: ${UI_CONTROLLER_REQUEST_TIMEOUT_SECONDS:60}
     upstream-retry-attempts: ${UI_CONTROLLER_UPSTREAM_RETRY_ATTEMPTS:8}
     upstream-retry-delay-millis: ${UI_CONTROLLER_UPSTREAM_RETRY_DELAY_MILLIS:300}
