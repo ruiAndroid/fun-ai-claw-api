@@ -1,6 +1,9 @@
 package com.fun.ai.claw.api.service;
 
+import com.fun.ai.claw.api.model.AgentDescriptorResponse;
+import com.fun.ai.claw.api.model.AgentSystemPromptResponse;
 import com.fun.ai.claw.api.model.InstanceActionType;
+import com.fun.ai.claw.api.model.SkillDescriptorResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -14,6 +17,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -125,6 +129,86 @@ public class PlaneClient {
         }
     }
 
+    public List<AgentDescriptorResponse> listAgents(UUID instanceId) {
+        try {
+            PlaneAgentListResponse response = restClient.get()
+                    .uri(planeBaseUrl + "/instances/" + instanceId + "/agents")
+                    .retrieve()
+                    .body(PlaneAgentListResponse.class);
+            if (response == null || response.items() == null) {
+                return List.of();
+            }
+            return response.items();
+        } catch (RestClientResponseException ex) {
+            throw mapPlaneQueryFailure("plane agent list failed", ex);
+        } catch (ResourceAccessException ex) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_GATEWAY,
+                    "plane service unavailable: " + planeBaseUrl + "/instances/" + instanceId + "/agents"
+                            + (StringUtils.hasText(ex.getMessage()) ? " (" + ex.getMessage() + ")" : "")
+            );
+        }
+    }
+
+    public AgentSystemPromptResponse getAgentSystemPrompt(UUID instanceId, String agentId) {
+        try {
+            AgentSystemPromptResponse response = restClient.get()
+                    .uri(planeBaseUrl + "/instances/{instanceId}/agents/{agentId}/system-prompt", instanceId, agentId)
+                    .retrieve()
+                    .body(AgentSystemPromptResponse.class);
+            if (response == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "plane returned empty response");
+            }
+            return response;
+        } catch (RestClientResponseException ex) {
+            throw mapPlaneQueryFailure("plane agent prompt failed", ex);
+        } catch (ResourceAccessException ex) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_GATEWAY,
+                    "plane service unavailable: " + planeBaseUrl + "/instances/" + instanceId + "/agents/" + agentId + "/system-prompt"
+                            + (StringUtils.hasText(ex.getMessage()) ? " (" + ex.getMessage() + ")" : "")
+            );
+        }
+    }
+
+    public List<SkillDescriptorResponse> listSkills(UUID instanceId) {
+        try {
+            PlaneSkillListResponse response = restClient.get()
+                    .uri(planeBaseUrl + "/instances/" + instanceId + "/skills")
+                    .retrieve()
+                    .body(PlaneSkillListResponse.class);
+            if (response == null || response.items() == null) {
+                return List.of();
+            }
+            return response.items();
+        } catch (RestClientResponseException ex) {
+            throw mapPlaneQueryFailure("plane skill list failed", ex);
+        } catch (ResourceAccessException ex) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_GATEWAY,
+                    "plane service unavailable: " + planeBaseUrl + "/instances/" + instanceId + "/skills"
+                            + (StringUtils.hasText(ex.getMessage()) ? " (" + ex.getMessage() + ")" : "")
+            );
+        }
+    }
+
+    private ResponseStatusException mapPlaneQueryFailure(String operation, RestClientResponseException ex) {
+        String details = ex.getResponseBodyAsString();
+        if (ex.getStatusCode().is4xxClientError()) {
+            HttpStatus status = HttpStatus.resolve(ex.getStatusCode().value());
+            if (status != null) {
+                throw new ResponseStatusException(
+                        status,
+                        StringUtils.hasText(details) ? details : operation + ": HTTP " + ex.getStatusCode().value()
+                );
+            }
+        }
+        throw new ResponseStatusException(
+                HttpStatus.BAD_GATEWAY,
+                operation + ": HTTP " + ex.getStatusCode().value() + (StringUtils.hasText(details) ? " " + details : "")
+        );
+    }
+
     public record PlaneReconcileRequest(
             UUID taskId,
             UUID instanceId,
@@ -147,6 +231,16 @@ public class PlaneClient {
         public boolean succeeded() {
             return "SUCCEEDED".equalsIgnoreCase(status);
         }
+    }
+
+    private record PlaneAgentListResponse(
+            List<AgentDescriptorResponse> items
+    ) {
+    }
+
+    private record PlaneSkillListResponse(
+            List<SkillDescriptorResponse> items
+    ) {
     }
 }
 

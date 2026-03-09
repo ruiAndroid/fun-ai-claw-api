@@ -62,6 +62,7 @@ app:
 - API calls plane service for real execution. Configure:
   - `PLANE_BASE_URL` (default: `http://127.0.0.1:8090/internal/v1`)
   - `PLANE_REQUESTED_BY` (default: `fun-ai-claw-api`)
+- Runtime metadata endpoints such as `GET /v1/instances/{instanceId}/agents`, `GET /v1/instances/{instanceId}/agents/{agentId}/system-prompt`, and `GET /v1/instances/{instanceId}/skills` are also served through plane, so split deployments no longer need local Docker access on the API host for these reads.
 - Instance main-agent guidance is stored in DB table `instance_main_prompt`.
 - Agent Session websocket launches interactive `zeroclaw agent` inside the target container and keeps multi-turn confirmation context until the client disconnects.
 - Agent Session defaults can be adjusted with:
