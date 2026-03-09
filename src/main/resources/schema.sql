@@ -76,3 +76,35 @@ alter table instance_main_prompt
     alter column updated_at set not null;
 
 create index if not exists idx_instance_main_prompt_updated_at on instance_main_prompt (updated_at);
+
+create table if not exists instance_runtime_config (
+    instance_id uuid primary key references claw_instance (id) on delete cascade,
+    config_toml text not null,
+    updated_by varchar(128) null,
+    updated_at timestamptz not null
+);
+
+alter table instance_runtime_config
+    add column if not exists config_toml text;
+
+alter table instance_runtime_config
+    add column if not exists updated_by varchar(128) null;
+
+alter table instance_runtime_config
+    add column if not exists updated_at timestamptz;
+
+update instance_runtime_config
+set config_toml = ''
+where config_toml is null;
+
+alter table instance_runtime_config
+    alter column config_toml set not null;
+
+update instance_runtime_config
+set updated_at = now()
+where updated_at is null;
+
+alter table instance_runtime_config
+    alter column updated_at set not null;
+
+create index if not exists idx_instance_runtime_config_updated_at on instance_runtime_config (updated_at);

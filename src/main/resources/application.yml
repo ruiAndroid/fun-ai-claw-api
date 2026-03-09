@@ -54,6 +54,12 @@ app:
     instance-workspace-path: /zeroclaw-data/workspace/AGENTS.md
     # Protect DB/API from oversized prompts.
     max-bytes: 262144
+  instance-config:
+    default-config-toml-path: classpath:templates/default-instance-config.toml
+    default-config-toml: ""
+    overwrite-on-start: true
+    runtime-config-path: /data/zeroclaw/config.toml
+    max-bytes: 524288
   images:
     allow-custom-image: false
     presets:

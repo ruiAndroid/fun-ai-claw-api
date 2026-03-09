@@ -5,14 +5,17 @@ import com.fun.ai.claw.api.model.AgentDescriptorResponse;
 import com.fun.ai.claw.api.model.AgentSystemPromptResponse;
 import com.fun.ai.claw.api.model.CreateInstanceRequest;
 import com.fun.ai.claw.api.model.InstanceActionRequest;
+import com.fun.ai.claw.api.model.InstanceConfigResponse;
 import com.fun.ai.claw.api.model.InstanceMainAgentGuidanceResponse;
 import com.fun.ai.claw.api.model.ListResponse;
 import com.fun.ai.claw.api.model.ClawInstanceDto;
 import com.fun.ai.claw.api.model.PairingCodeResponse;
 import com.fun.ai.claw.api.model.SkillDescriptorResponse;
+import com.fun.ai.claw.api.model.UpsertInstanceConfigRequest;
 import com.fun.ai.claw.api.model.UpsertInstanceMainAgentGuidanceRequest;
 import com.fun.ai.claw.api.service.ControlService;
 import com.fun.ai.claw.api.service.InstanceAgentService;
+import com.fun.ai.claw.api.service.InstanceConfigService;
 import com.fun.ai.claw.api.service.InstanceMainAgentGuidanceService;
 import com.fun.ai.claw.api.service.InstanceSkillService;
 import com.fun.ai.claw.api.service.PairingCodeService;
@@ -39,17 +42,20 @@ public class InstanceController {
     private final InstanceAgentService instanceAgentService;
     private final InstanceSkillService instanceSkillService;
     private final InstanceMainAgentGuidanceService instanceMainAgentGuidanceService;
+    private final InstanceConfigService instanceConfigService;
 
     public InstanceController(ControlService controlService,
                               PairingCodeService pairingCodeService,
                               InstanceAgentService instanceAgentService,
                               InstanceSkillService instanceSkillService,
-                              InstanceMainAgentGuidanceService instanceMainAgentGuidanceService) {
+                              InstanceMainAgentGuidanceService instanceMainAgentGuidanceService,
+                              InstanceConfigService instanceConfigService) {
         this.controlService = controlService;
         this.pairingCodeService = pairingCodeService;
         this.instanceAgentService = instanceAgentService;
         this.instanceSkillService = instanceSkillService;
         this.instanceMainAgentGuidanceService = instanceMainAgentGuidanceService;
+        this.instanceConfigService = instanceConfigService;
     }
 
     @GetMapping
@@ -89,6 +95,22 @@ public class InstanceController {
     @GetMapping("/{instanceId}/skills")
     public ListResponse<SkillDescriptorResponse> listSkills(@PathVariable UUID instanceId) {
         return new ListResponse<>(instanceSkillService.listSkills(instanceId));
+    }
+
+    @GetMapping("/{instanceId}/config")
+    public InstanceConfigResponse getInstanceConfig(@PathVariable UUID instanceId) {
+        return instanceConfigService.get(instanceId);
+    }
+
+    @PutMapping("/{instanceId}/config")
+    public InstanceConfigResponse upsertInstanceConfig(@PathVariable UUID instanceId,
+                                                       @RequestBody UpsertInstanceConfigRequest request) {
+        return instanceConfigService.upsert(instanceId, request);
+    }
+
+    @DeleteMapping("/{instanceId}/config")
+    public InstanceConfigResponse deleteInstanceConfigOverride(@PathVariable UUID instanceId) {
+        return instanceConfigService.deleteOverride(instanceId);
     }
 
     @GetMapping("/{instanceId}/main-agent-guidance")

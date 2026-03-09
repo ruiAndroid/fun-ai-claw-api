@@ -28,17 +28,21 @@ import java.util.UUID;
 public class PlaneClient {
     private static final String AGENTS_MD_CONTENT_PAYLOAD_KEY = "agentsMdContent";
     private static final String AGENTS_MD_OVERWRITE_PAYLOAD_KEY = "agentsMdOverwrite";
+    private static final String CONFIG_TOML_CONTENT_PAYLOAD_KEY = "configTomlContent";
+    private static final String CONFIG_TOML_OVERWRITE_PAYLOAD_KEY = "configTomlOverwrite";
 
     private final RestClient restClient;
     private final String planeBaseUrl;
     private final String requestedBy;
     private final InstanceMainAgentGuidanceService instanceMainAgentGuidanceService;
+    private final InstanceConfigService instanceConfigService;
 
     public PlaneClient(@Value("${app.plane.base-url:http://127.0.0.1:8090/internal/v1}") String planeBaseUrl,
                        @Value("${app.plane.requested-by:fun-ai-claw-api}") String requestedBy,
                        @Value("${app.plane.connect-timeout-seconds:3}") long connectTimeoutSeconds,
                        @Value("${app.plane.request-timeout-seconds:90}") long requestTimeoutSeconds,
-                       InstanceMainAgentGuidanceService instanceMainAgentGuidanceService) {
+                       InstanceMainAgentGuidanceService instanceMainAgentGuidanceService,
+                       InstanceConfigService instanceConfigService) {
         long resolvedConnectTimeoutSeconds = connectTimeoutSeconds > 0 ? connectTimeoutSeconds : 3;
         long resolvedRequestTimeoutSeconds = requestTimeoutSeconds > 0 ? requestTimeoutSeconds : 90;
         HttpClient httpClient = HttpClient.newBuilder()
@@ -52,6 +56,7 @@ public class PlaneClient {
         this.planeBaseUrl = planeBaseUrl;
         this.requestedBy = requestedBy;
         this.instanceMainAgentGuidanceService = instanceMainAgentGuidanceService;
+        this.instanceConfigService = instanceConfigService;
     }
 
     public PlaneTaskExecutionRecord reconcileInstanceAction(UUID instanceId,
@@ -74,6 +79,13 @@ public class PlaneClient {
             } else if (guidance.overwriteOnStart()) {
                 // Clear stale workspace AGENTS.md when there is no effective guidance.
                 payload.put(AGENTS_MD_CONTENT_PAYLOAD_KEY, "");
+            }
+            InstanceConfigService.RuntimeConfig runtimeConfig = instanceConfigService.resolveRuntimeConfig(instanceId);
+            payload.put(CONFIG_TOML_OVERWRITE_PAYLOAD_KEY, runtimeConfig.overwriteOnStart());
+            if (runtimeConfig.content() != null) {
+                payload.put(CONFIG_TOML_CONTENT_PAYLOAD_KEY, runtimeConfig.content());
+            } else if (runtimeConfig.overwriteOnStart()) {
+                payload.put(CONFIG_TOML_CONTENT_PAYLOAD_KEY, "");
             }
         }
 
