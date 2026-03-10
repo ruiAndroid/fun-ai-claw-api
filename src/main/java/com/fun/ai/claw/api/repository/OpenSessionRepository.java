@@ -24,9 +24,7 @@ public class OpenSessionRepository {
             rs.getString("agent_id"),
             rs.getString("external_user_id"),
             rs.getString("external_session_key"),
-            rs.getString("title"),
             OpenSessionStatus.valueOf(rs.getString("status")),
-            rs.getString("metadata_json"),
             rs.getString("ws_token_hash"),
             rs.getTimestamp("ws_token_expires_at") == null ? null : rs.getTimestamp("ws_token_expires_at").toInstant(),
             rs.getTimestamp("created_at").toInstant(),
@@ -40,8 +38,8 @@ public class OpenSessionRepository {
 
     public Optional<OpenSessionRecord> findById(UUID sessionId) {
         List<OpenSessionRecord> rows = jdbcTemplate.query("""
-                        select id, app_id, instance_id, agent_id, external_user_id, external_session_key, title, status,
-                               metadata_json, ws_token_hash, ws_token_expires_at, created_at, updated_at, last_message_at
+                        select id, app_id, instance_id, agent_id, external_user_id, external_session_key, status,
+                               ws_token_hash, ws_token_expires_at, created_at, updated_at, last_message_at
                         from open_session
                         where id = ?
                         """,
@@ -56,8 +54,8 @@ public class OpenSessionRepository {
             return Optional.empty();
         }
         List<OpenSessionRecord> rows = jdbcTemplate.query("""
-                        select id, app_id, instance_id, agent_id, external_user_id, external_session_key, title, status,
-                               metadata_json, ws_token_hash, ws_token_expires_at, created_at, updated_at, last_message_at
+                        select id, app_id, instance_id, agent_id, external_user_id, external_session_key, status,
+                               ws_token_hash, ws_token_expires_at, created_at, updated_at, last_message_at
                         from open_session
                         where app_id = ?
                           and external_session_key = ?
@@ -72,9 +70,9 @@ public class OpenSessionRepository {
     public void insert(OpenSessionRecord session) {
         jdbcTemplate.update("""
                         insert into open_session
-                        (id, app_id, instance_id, agent_id, external_user_id, external_session_key, title, status,
-                         metadata_json, ws_token_hash, ws_token_expires_at, created_at, updated_at, last_message_at)
-                        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (id, app_id, instance_id, agent_id, external_user_id, external_session_key, status,
+                         ws_token_hash, ws_token_expires_at, created_at, updated_at, last_message_at)
+                        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                 session.id(),
                 session.appId(),
@@ -82,9 +80,7 @@ public class OpenSessionRepository {
                 session.agentId(),
                 session.externalUserId(),
                 session.externalSessionKey(),
-                session.title(),
                 session.status().name(),
-                session.metadataJson(),
                 session.wsTokenHash(),
                 session.wsTokenExpiresAt() == null ? null : Timestamp.from(session.wsTokenExpiresAt()),
                 Timestamp.from(session.createdAt()),

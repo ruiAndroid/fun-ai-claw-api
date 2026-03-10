@@ -181,9 +181,7 @@ create table if not exists open_session (
     agent_id varchar(128) null,
     external_user_id varchar(128) null,
     external_session_key varchar(128) null,
-    title varchar(255) null,
     status varchar(32) not null,
-    metadata_json text null,
     ws_token_hash varchar(128) not null,
     ws_token_expires_at timestamptz null,
     created_at timestamptz not null,
@@ -207,13 +205,7 @@ alter table open_session
     add column if not exists external_session_key varchar(128) null;
 
 alter table open_session
-    add column if not exists title varchar(255) null;
-
-alter table open_session
     add column if not exists status varchar(32);
-
-alter table open_session
-    add column if not exists metadata_json text null;
 
 alter table open_session
     add column if not exists ws_token_hash varchar(128);
@@ -229,6 +221,12 @@ alter table open_session
 
 alter table open_session
     add column if not exists last_message_at timestamptz null;
+
+alter table open_session
+    drop column if exists title;
+
+alter table open_session
+    drop column if exists metadata_json;
 
 update open_session
 set status = 'ACTIVE'

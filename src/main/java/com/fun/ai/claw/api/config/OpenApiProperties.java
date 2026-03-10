@@ -50,6 +50,7 @@ public class OpenApiProperties {
 
     public static class Session {
         private long wsTokenTtlSeconds = 86400;
+        private boolean messagePersistenceEnabled = false;
 
         public long getWsTokenTtlSeconds() {
             return wsTokenTtlSeconds;
@@ -57,6 +58,14 @@ public class OpenApiProperties {
 
         public void setWsTokenTtlSeconds(long wsTokenTtlSeconds) {
             this.wsTokenTtlSeconds = wsTokenTtlSeconds;
+        }
+
+        public boolean isMessagePersistenceEnabled() {
+            return messagePersistenceEnabled;
+        }
+
+        public void setMessagePersistenceEnabled(boolean messagePersistenceEnabled) {
+            this.messagePersistenceEnabled = messagePersistenceEnabled;
         }
     }
 }

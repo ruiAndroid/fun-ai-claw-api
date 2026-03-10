@@ -1,7 +1,6 @@
 package com.fun.ai.claw.api.model;
 
 import java.time.Instant;
-import java.util.Map;
 import java.util.UUID;
 
 public record OpenSessionResponse(
@@ -11,9 +10,7 @@ public record OpenSessionResponse(
         String agentId,
         String externalUserId,
         String externalSessionKey,
-        String title,
         OpenSessionStatus status,
-        Map<String, Object> metadata,
         String websocketPath,
         String websocketToken,
         Instant websocketTokenExpiresAt,

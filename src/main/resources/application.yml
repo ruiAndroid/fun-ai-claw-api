@@ -27,6 +27,7 @@ app:
       app-secret-header: X-Open-App-Secret
     session:
       ws-token-ttl-seconds: 86400
+      message-persistence-enabled: false
   plane:
     base-url: ${PLANE_BASE_URL:http://172.21.138.108:8090/internal/v1}
     requested-by: ${PLANE_REQUESTED_BY:fun-ai-claw-api}

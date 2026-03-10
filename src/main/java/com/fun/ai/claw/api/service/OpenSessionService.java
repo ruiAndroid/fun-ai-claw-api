@@ -53,7 +53,7 @@ public class OpenSessionService {
     @Transactional
     public OpenSessionResponse createSession(OpenClientAppRecord app, OpenSessionCreateRequest request) {
         OpenSessionCreateRequest normalizedRequest = request == null
-                ? new OpenSessionCreateRequest(null, null, null, null, null, null)
+                ? new OpenSessionCreateRequest(null, null, null, null)
                 : request;
 
         UUID resolvedInstanceId = Optional.ofNullable(normalizedRequest.instanceId())
@@ -98,9 +98,7 @@ public class OpenSessionService {
                 normalizeBlank(resolvedAgentId),
                 normalizeBlank(normalizedRequest.externalUserId()),
                 normalizedExternalSessionKey,
-                normalizeBlank(normalizedRequest.title()),
                 OpenSessionStatus.ACTIVE,
-                toJson(normalizedRequest.metadata()),
                 wsTokenHash,
                 wsTokenExpiresAt,
                 now,
@@ -148,21 +146,23 @@ public class OpenSessionService {
     @Transactional
     public void recordUserInput(UUID sessionId, String payload) {
         Instant now = Instant.now();
-        openSessionMessageRepository.insert(new OpenSessionMessageRecord(
-                UUID.randomUUID(),
-                sessionId,
-                "user_input",
-                "user",
-                payload == null ? "" : payload,
-                null,
-                null,
-                payload,
-                null,
-                null,
-                false,
-                now,
-                now
-        ));
+        if (openApiProperties.getSession().isMessagePersistenceEnabled()) {
+            openSessionMessageRepository.insert(new OpenSessionMessageRecord(
+                    UUID.randomUUID(),
+                    sessionId,
+                    "user_input",
+                    "user",
+                    payload == null ? "" : payload,
+                    null,
+                    null,
+                    payload,
+                    null,
+                    null,
+                    false,
+                    now,
+                    now
+            ));
+        }
         openSessionRepository.touch(sessionId, now, now);
     }
 
@@ -180,21 +180,23 @@ public class OpenSessionService {
                                      Instant emittedAt) {
         Instant createdAt = Instant.now();
         Instant effectiveEmittedAt = emittedAt == null ? createdAt : emittedAt;
-        openSessionMessageRepository.insert(new OpenSessionMessageRecord(
-                UUID.randomUUID(),
-                sessionId,
-                normalizeBlank(eventType) == null ? "message" : normalizeBlank(eventType),
-                normalizeBlank(role) == null ? "assistant" : normalizeBlank(role),
-                content == null ? "" : content,
-                normalizeBlank(thinkingContent),
-                toJson(interaction),
-                rawPayload,
-                normalizeBlank(providerMessageId),
-                providerSequence,
-                pending,
-                effectiveEmittedAt,
-                createdAt
-        ));
+        if (openApiProperties.getSession().isMessagePersistenceEnabled()) {
+            openSessionMessageRepository.insert(new OpenSessionMessageRecord(
+                    UUID.randomUUID(),
+                    sessionId,
+                    normalizeBlank(eventType) == null ? "message" : normalizeBlank(eventType),
+                    normalizeBlank(role) == null ? "assistant" : normalizeBlank(role),
+                    content == null ? "" : content,
+                    normalizeBlank(thinkingContent),
+                    toJson(interaction),
+                    rawPayload,
+                    normalizeBlank(providerMessageId),
+                    providerSequence,
+                    pending,
+                    effectiveEmittedAt,
+                    createdAt
+            ));
+        }
         openSessionRepository.touch(sessionId, createdAt, effectiveEmittedAt);
     }
 
@@ -219,9 +221,7 @@ public class OpenSessionService {
                 session.agentId(),
                 session.externalUserId(),
                 session.externalSessionKey(),
-                session.title(),
                 session.status(),
-                parseJsonMap(session.metadataJson()),
                 OPEN_AGENT_SESSION_WS_PATH + "?sessionId=" + session.id()
                         + (StringUtils.hasText(websocketToken) ? "&wsToken=" + websocketToken : ""),
                 websocketToken,
