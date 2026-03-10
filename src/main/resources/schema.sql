@@ -141,15 +141,6 @@ alter table open_client_app
 alter table open_client_app
     add column if not exists updated_at timestamptz;
 
--- migrate: rename app_secret_hash to app_secret if old column exists
-do $$
-begin
-    if exists (select 1 from information_schema.columns where table_name = 'open_client_app' and column_name = 'app_secret_hash')
-       and not exists (select 1 from information_schema.columns where table_name = 'open_client_app' and column_name = 'app_secret') then
-        alter table open_client_app rename column app_secret_hash to app_secret;
-    end if;
-end $$;
-
 update open_client_app
 set name = app_id
 where name is null;
