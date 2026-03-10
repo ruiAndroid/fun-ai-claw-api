@@ -5,6 +5,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -40,5 +42,61 @@ public class OpenClientAppRepository {
                 appId
         );
         return rows.stream().findFirst();
+    }
+
+    public List<OpenClientAppRecord> findAll() {
+        return jdbcTemplate.query("""
+                        select app_id, name, app_secret_hash, enabled, default_instance_id, default_agent_id, created_at, updated_at
+                        from open_client_app
+                        order by created_at desc
+                        """,
+                rowMapper
+        );
+    }
+
+    public Optional<OpenClientAppRecord> findByAppId(String appId) {
+        List<OpenClientAppRecord> rows = jdbcTemplate.query("""
+                        select app_id, name, app_secret_hash, enabled, default_instance_id, default_agent_id, created_at, updated_at
+                        from open_client_app
+                        where app_id = ?
+                        """,
+                rowMapper,
+                appId
+        );
+        return rows.stream().findFirst();
+    }
+
+    public void insert(String appId, String name, String appSecretHash, boolean enabled,
+                       UUID defaultInstanceId, String defaultAgentId, Instant now) {
+        jdbcTemplate.update("""
+                        insert into open_client_app (app_id, name, app_secret_hash, enabled, default_instance_id, default_agent_id, created_at, updated_at)
+                        values (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                appId, name, appSecretHash, enabled,
+                defaultInstanceId, defaultAgentId,
+                Timestamp.from(now), Timestamp.from(now)
+        );
+    }
+
+    public int update(String appId, String name, Boolean enabled,
+                      UUID defaultInstanceId, String defaultAgentId, Instant now) {
+        return jdbcTemplate.update("""
+                        update open_client_app
+                        set name = coalesce(?, name),
+                            enabled = coalesce(?, enabled),
+                            default_instance_id = ?,
+                            default_agent_id = ?,
+                            updated_at = ?
+                        where app_id = ?
+                        """,
+                name, enabled,
+                defaultInstanceId, defaultAgentId,
+                Timestamp.from(now),
+                appId
+        );
+    }
+
+    public int deleteByAppId(String appId) {
+        return jdbcTemplate.update("delete from open_client_app where app_id = ?", appId);
     }
 }

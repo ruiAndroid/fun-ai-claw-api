@@ -1,9 +1,11 @@
 package com.fun.ai.claw.api.service;
 
+import jakarta.annotation.PreDestroy;
 import org.springframework.http.HttpHeaders;
 import org.springframework.util.StringUtils;
 import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.CloseStatus;
+import org.springframework.web.socket.PingMessage;
 import org.springframework.web.socket.PongMessage;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketHttpHeaders;
@@ -22,6 +24,10 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 abstract class AbstractPlaneWebSocketProxyHandler extends AbstractWebSocketHandler {
 
@@ -39,17 +45,26 @@ abstract class AbstractPlaneWebSocketProxyHandler extends AbstractWebSocketHandl
     private final String planeWsScheme;
     private final String upstreamPath;
     private final Duration connectTimeout;
+    private final Duration keepaliveInterval;
+    private final ScheduledExecutorService keepaliveExecutor;
     private final Map<String, ProxyContext> contexts = new ConcurrentHashMap<>();
 
     protected AbstractPlaneWebSocketProxyHandler(String planeBaseUrl,
                                                  String upstreamPath,
-                                                 long wsConnectTimeoutSeconds) {
+                                                 long wsConnectTimeoutSeconds,
+                                                 long wsKeepaliveSeconds) {
         this.webSocketClient = new StandardWebSocketClient();
         this.planeBaseUri = URI.create(requirePlaneBaseUrl(planeBaseUrl));
         this.planeWsScheme = normalizeWsScheme(this.planeBaseUri.getScheme());
         this.upstreamPath = normalizeUpstreamPath(upstreamPath);
         long timeoutSeconds = wsConnectTimeoutSeconds > 0 ? wsConnectTimeoutSeconds : 10;
         this.connectTimeout = Duration.ofSeconds(timeoutSeconds);
+        this.keepaliveInterval = wsKeepaliveSeconds > 0 ? Duration.ofSeconds(wsKeepaliveSeconds) : Duration.ZERO;
+        this.keepaliveExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread thread = new Thread(r, "fun-ai-claw-api-ws-keepalive");
+            thread.setDaemon(true);
+            return thread;
+        });
     }
 
     @Override
@@ -69,6 +84,7 @@ abstract class AbstractPlaneWebSocketProxyHandler extends AbstractWebSocketHandl
                         closeAndCleanup(clientSession.getId(), CloseStatus.SERVER_ERROR);
                     }
                 });
+        scheduleKeepalive(context, clientSession.getId());
     }
 
     private HttpHeaders resolveHandshakeHeaders(WebSocketSession session) {
@@ -102,6 +118,11 @@ abstract class AbstractPlaneWebSocketProxyHandler extends AbstractWebSocketHandl
     @Override
     public void handleTransportError(WebSocketSession session, Throwable exception) {
         closeAndCleanup(session.getId(), CloseStatus.SERVER_ERROR);
+    }
+
+    @PreDestroy
+    public void shutdownKeepaliveExecutor() {
+        keepaliveExecutor.shutdownNow();
     }
 
     private URI buildTargetUri(URI inboundUri) {
@@ -186,6 +207,11 @@ abstract class AbstractPlaneWebSocketProxyHandler extends AbstractWebSocketHandl
             return;
         }
 
+        ScheduledFuture<?> keepaliveTask = context.keepaliveTask();
+        if (keepaliveTask != null) {
+            keepaliveTask.cancel(true);
+        }
+
         CompletableFuture<WebSocketSession> upstreamFuture = context.upstreamFuture();
         if (upstreamFuture != null && !upstreamFuture.isDone()) {
             upstreamFuture.cancel(true);
@@ -203,6 +229,44 @@ abstract class AbstractPlaneWebSocketProxyHandler extends AbstractWebSocketHandl
             session.close(status);
         } catch (IOException ignored) {
             // Ignore close failures.
+        }
+    }
+
+    private void scheduleKeepalive(ProxyContext context, String clientSessionId) {
+        if (context == null || keepaliveInterval.isZero() || keepaliveInterval.isNegative()) {
+            return;
+        }
+        ScheduledFuture<?> task = keepaliveExecutor.scheduleAtFixedRate(
+                () -> sendKeepalive(clientSessionId),
+                keepaliveInterval.toSeconds(),
+                keepaliveInterval.toSeconds(),
+                TimeUnit.SECONDS
+        );
+        context.setKeepaliveTask(task);
+    }
+
+    private void sendKeepalive(String clientSessionId) {
+        ProxyContext context = contexts.get(clientSessionId);
+        if (context == null) {
+            return;
+        }
+        ByteBuffer payload = ByteBuffer.wrap(Long.toString(System.currentTimeMillis()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        if (!sendPing(context.clientSession(), payload.duplicate()) || !sendPing(context.upstreamSession(), payload.duplicate())) {
+            closeAndCleanup(clientSessionId, CloseStatus.SESSION_NOT_RELIABLE);
+        }
+    }
+
+    private boolean sendPing(WebSocketSession session, ByteBuffer payload) {
+        if (session == null || !session.isOpen()) {
+            return false;
+        }
+        try {
+            synchronized (session) {
+                session.sendMessage(new PingMessage(payload));
+            }
+            return true;
+        } catch (IOException ex) {
+            return false;
         }
     }
 
@@ -298,6 +362,7 @@ abstract class AbstractPlaneWebSocketProxyHandler extends AbstractWebSocketHandl
         private final WebSocketSession clientSession;
         private volatile WebSocketSession upstreamSession;
         private volatile CompletableFuture<WebSocketSession> upstreamFuture;
+        private volatile ScheduledFuture<?> keepaliveTask;
 
         private ProxyContext(WebSocketSession clientSession) {
             this.clientSession = clientSession;
@@ -321,6 +386,14 @@ abstract class AbstractPlaneWebSocketProxyHandler extends AbstractWebSocketHandl
 
         private void setUpstreamFuture(CompletableFuture<WebSocketSession> upstreamFuture) {
             this.upstreamFuture = upstreamFuture;
+        }
+
+        private ScheduledFuture<?> keepaliveTask() {
+            return keepaliveTask;
+        }
+
+        private void setKeepaliveTask(ScheduledFuture<?> keepaliveTask) {
+            this.keepaliveTask = keepaliveTask;
         }
     }
 }

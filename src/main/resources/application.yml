@@ -33,6 +33,7 @@ app:
     connect-timeout-seconds: ${PLANE_CONNECT_TIMEOUT_SECONDS:3}
     request-timeout-seconds: ${PLANE_REQUEST_TIMEOUT_SECONDS:90}
     ws-connect-timeout-seconds: ${PLANE_WS_CONNECT_TIMEOUT_SECONDS:10}
+    ws-keepalive-seconds: ${PLANE_WS_KEEPALIVE_SECONDS:25}
   gateway:
     port-range-start: ${GATEWAY_PORT_RANGE_START:42617}
     port-range-end: ${GATEWAY_PORT_RANGE_END:42717}
