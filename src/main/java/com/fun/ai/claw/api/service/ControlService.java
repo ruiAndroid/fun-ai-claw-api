@@ -45,7 +45,7 @@ public class ControlService {
                           PlaneClient planeClient,
                           @Value("${app.gateway.port-range-start:42617}") int gatewayPortRangeStart,
                           @Value("${app.gateway.port-range-end:42717}") int gatewayPortRangeEnd,
-                          @Value("${app.gateway.url-template:http://8.152.159.249:80/fun-claw/ui-controller/{instanceId}}") String gatewayUrlTemplate,
+                          @Value("${app.gateway.url-template:http://8.152.159.249/fun-claw/ui-controller/{instanceId}}") String gatewayUrlTemplate,
                           @Value("${app.remote-connect.command-template:}") String remoteConnectCommandTemplate) {
         this.instanceRepository = instanceRepository;
         this.imageCatalogProperties = imageCatalogProperties;

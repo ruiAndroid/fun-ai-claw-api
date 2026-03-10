@@ -29,7 +29,7 @@ app:
   gateway:
     port-range-start: ${GATEWAY_PORT_RANGE_START:42617}
     port-range-end: ${GATEWAY_PORT_RANGE_END:42717}
-    url-template: ${GATEWAY_URL_TEMPLATE:http://8.152.159.249:80/fun-claw/ui-controller/{instanceId}}
+    url-template: ${GATEWAY_URL_TEMPLATE:http://8.152.159.249/fun-claw/ui-controller/{instanceId}}
   remote-connect:
     command-template:  ${REMOTE_CONNECT_COMMAND_TEMPLATE:ssh root@172.21.138.108 "docker exec -it funclaw-{instanceId} /bin/busybox sh"}
   ui-controller:
