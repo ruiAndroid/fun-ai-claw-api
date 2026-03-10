@@ -8,7 +8,6 @@ public record OpenSessionRecord(
         String appId,
         UUID instanceId,
         String agentId,
-        String externalUserId,
         String externalSessionKey,
         OpenSessionStatus status,
         String wsTokenHash,

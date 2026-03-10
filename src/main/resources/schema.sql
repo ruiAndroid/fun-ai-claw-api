@@ -179,7 +179,6 @@ create table if not exists open_session (
     app_id varchar(64) not null references open_client_app (app_id) on delete cascade,
     instance_id uuid not null references claw_instance (id) on delete cascade,
     agent_id varchar(128) null,
-    external_user_id varchar(128) null,
     external_session_key varchar(128) null,
     status varchar(32) not null,
     ws_token_hash varchar(128) not null,
@@ -197,9 +196,6 @@ alter table open_session
 
 alter table open_session
     add column if not exists agent_id varchar(128) null;
-
-alter table open_session
-    add column if not exists external_user_id varchar(128) null;
 
 alter table open_session
     add column if not exists external_session_key varchar(128) null;
@@ -227,6 +223,9 @@ alter table open_session
 
 alter table open_session
     drop column if exists metadata_json;
+
+alter table open_session
+    drop column if exists external_user_id;
 
 update open_session
 set status = 'ACTIVE'

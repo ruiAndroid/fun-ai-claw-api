@@ -22,7 +22,6 @@ public class OpenSessionRepository {
             rs.getString("app_id"),
             rs.getObject("instance_id", UUID.class),
             rs.getString("agent_id"),
-            rs.getString("external_user_id"),
             rs.getString("external_session_key"),
             OpenSessionStatus.valueOf(rs.getString("status")),
             rs.getString("ws_token_hash"),
@@ -38,7 +37,7 @@ public class OpenSessionRepository {
 
     public Optional<OpenSessionRecord> findById(UUID sessionId) {
         List<OpenSessionRecord> rows = jdbcTemplate.query("""
-                        select id, app_id, instance_id, agent_id, external_user_id, external_session_key, status,
+                        select id, app_id, instance_id, agent_id, external_session_key, status,
                                ws_token_hash, ws_token_expires_at, created_at, updated_at, last_message_at
                         from open_session
                         where id = ?
@@ -54,7 +53,7 @@ public class OpenSessionRepository {
             return Optional.empty();
         }
         List<OpenSessionRecord> rows = jdbcTemplate.query("""
-                        select id, app_id, instance_id, agent_id, external_user_id, external_session_key, status,
+                        select id, app_id, instance_id, agent_id, external_session_key, status,
                                ws_token_hash, ws_token_expires_at, created_at, updated_at, last_message_at
                         from open_session
                         where app_id = ?
@@ -70,15 +69,14 @@ public class OpenSessionRepository {
     public void insert(OpenSessionRecord session) {
         jdbcTemplate.update("""
                         insert into open_session
-                        (id, app_id, instance_id, agent_id, external_user_id, external_session_key, status,
+                        (id, app_id, instance_id, agent_id, external_session_key, status,
                          ws_token_hash, ws_token_expires_at, created_at, updated_at, last_message_at)
-                        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                 session.id(),
                 session.appId(),
                 session.instanceId(),
                 session.agentId(),
-                session.externalUserId(),
                 session.externalSessionKey(),
                 session.status().name(),
                 session.wsTokenHash(),

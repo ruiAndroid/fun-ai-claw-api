@@ -53,7 +53,7 @@ public class OpenSessionService {
     @Transactional
     public OpenSessionResponse createSession(OpenClientAppRecord app, OpenSessionCreateRequest request) {
         OpenSessionCreateRequest normalizedRequest = request == null
-                ? new OpenSessionCreateRequest(null, null, null, null)
+                ? new OpenSessionCreateRequest(null, null, null)
                 : request;
 
         UUID resolvedInstanceId = Optional.ofNullable(normalizedRequest.instanceId())
@@ -96,7 +96,6 @@ public class OpenSessionService {
                 app.appId(),
                 instance.id(),
                 normalizeBlank(resolvedAgentId),
-                normalizeBlank(normalizedRequest.externalUserId()),
                 normalizedExternalSessionKey,
                 OpenSessionStatus.ACTIVE,
                 wsTokenHash,
@@ -219,7 +218,6 @@ public class OpenSessionService {
                 session.appId(),
                 session.instanceId(),
                 session.agentId(),
-                session.externalUserId(),
                 session.externalSessionKey(),
                 session.status(),
                 OPEN_AGENT_SESSION_WS_PATH + "?sessionId=" + session.id()
