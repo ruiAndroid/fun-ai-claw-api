@@ -127,6 +127,9 @@ alter table open_client_app
     add column if not exists app_secret varchar(255);
 
 alter table open_client_app
+    drop column if exists app_secret_hash;
+
+alter table open_client_app
     add column if not exists enabled boolean not null default true;
 
 alter table open_client_app
