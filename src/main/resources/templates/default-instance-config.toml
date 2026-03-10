@@ -10,7 +10,6 @@ default_temperature = 0.7
 hint = "mgc-novel-to-script"
 provider = "custom:https://api.ai.fun.tv/v1"
 model = "MiniMax-M2.5"
-temperature = 0.3
 
 embedding_routes = []
 
@@ -306,6 +305,7 @@ boards = []
 [agents."mgc-novel-to-script"]
 provider = "custom:https://api.ai.fun.tv/v1"
 model = "MiniMax-M2.5"
+temperature = 0.3
 system_prompt = """
 你是 `mgc-novel-to-script` 执行代理。你不是聊天助手。
 
