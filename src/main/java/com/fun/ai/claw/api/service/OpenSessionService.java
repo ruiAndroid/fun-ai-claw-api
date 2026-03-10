@@ -1,7 +1,4 @@
 package com.fun.ai.claw.api.service;
-
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fun.ai.claw.api.config.OpenApiProperties;
 import com.fun.ai.claw.api.model.ClawInstanceDto;
 import com.fun.ai.claw.api.model.OpenClientAppRecord;
@@ -39,21 +36,18 @@ public class OpenSessionService {
     private final InstanceRepository instanceRepository;
     private final OpenApiAuthService openApiAuthService;
     private final OpenApiProperties openApiProperties;
-    private final ObjectMapper objectMapper;
     private final JsonParser jsonParser = JsonParserFactory.getJsonParser();
 
     public OpenSessionService(OpenSessionRepository openSessionRepository,
                               OpenSessionMessageRepository openSessionMessageRepository,
                               InstanceRepository instanceRepository,
                               OpenApiAuthService openApiAuthService,
-                              OpenApiProperties openApiProperties,
-                              ObjectMapper objectMapper) {
+                              OpenApiProperties openApiProperties) {
         this.openSessionRepository = openSessionRepository;
         this.openSessionMessageRepository = openSessionMessageRepository;
         this.instanceRepository = instanceRepository;
         this.openApiAuthService = openApiAuthService;
         this.openApiProperties = openApiProperties;
-        this.objectMapper = objectMapper;
     }
 
     @Transactional
@@ -271,11 +265,86 @@ public class OpenSessionService {
         if (value == null) {
             return null;
         }
-        try {
-            return objectMapper.writeValueAsString(value);
-        } catch (JsonProcessingException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "failed to serialize open session payload");
+        StringBuilder builder = new StringBuilder(256);
+        appendJsonValue(builder, value);
+        return builder.toString();
+    }
+
+    @SuppressWarnings("unchecked")
+    private void appendJsonValue(StringBuilder builder, Object value) {
+        if (value == null) {
+            builder.append("null");
+            return;
         }
+        if (value instanceof String text) {
+            appendJsonString(builder, text);
+            return;
+        }
+        if (value instanceof Number || value instanceof Boolean) {
+            builder.append(value);
+            return;
+        }
+        if (value instanceof Map<?, ?> map) {
+            builder.append('{');
+            boolean first = true;
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) map).entrySet()) {
+                if (!(entry.getKey() instanceof String key)) {
+                    continue;
+                }
+                if (!first) {
+                    builder.append(',');
+                }
+                first = false;
+                appendJsonString(builder, key);
+                builder.append(':');
+                appendJsonValue(builder, entry.getValue());
+            }
+            builder.append('}');
+            return;
+        }
+        if (value instanceof Iterable<?> iterable) {
+            builder.append('[');
+            boolean first = true;
+            for (Object item : iterable) {
+                if (!first) {
+                    builder.append(',');
+                }
+                first = false;
+                appendJsonValue(builder, item);
+            }
+            builder.append(']');
+            return;
+        }
+        appendJsonString(builder, String.valueOf(value));
+    }
+
+    private void appendJsonString(StringBuilder builder, String value) {
+        builder.append('"');
+        for (int index = 0; index < value.length(); index++) {
+            char current = value.charAt(index);
+            switch (current) {
+                case '\\' -> builder.append("\\\\");
+                case '"' -> builder.append("\\\"");
+                case '\b' -> builder.append("\\b");
+                case '\f' -> builder.append("\\f");
+                case '\n' -> builder.append("\\n");
+                case '\r' -> builder.append("\\r");
+                case '\t' -> builder.append("\\t");
+                default -> {
+                    if (current < 0x20) {
+                        builder.append("\\u");
+                        String hex = Integer.toHexString(current);
+                        for (int pad = hex.length(); pad < 4; pad++) {
+                            builder.append('0');
+                        }
+                        builder.append(hex);
+                    } else {
+                        builder.append(current);
+                    }
+                }
+            }
+        }
+        builder.append('"');
     }
 
     private String firstNonBlank(String... values) {

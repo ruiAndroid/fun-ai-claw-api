@@ -40,6 +40,15 @@ Schema is auto-initialized at startup via `src/main/resources/schema.sql`.
 - `DELETE /v1/instances/{instanceId}/main-agent-guidance`
 - `WS /v1/agent-session/ws?instanceId=<uuid>&agentId=<optional-agent-id>`
 - `WS /v1/terminal/ws?instanceId=<uuid>`
+- `POST /open/v1/sessions`
+- `GET /open/v1/sessions/{sessionId}`
+- `GET /open/v1/sessions/{sessionId}/messages`
+- `POST /open/v1/sessions/{sessionId}/close`
+- `WS /open/v1/agent-session/ws?sessionId=<uuid>&wsToken=<token>`
+
+External frontend integration guide:
+
+- [docs/open-v1-external-frontend-integration-guide.md](/D:/dev/AI/AIPro/fun-ai-claw/docs/open-v1-external-frontend-integration-guide.md)
 
 ## Runtime Image Presets
 
