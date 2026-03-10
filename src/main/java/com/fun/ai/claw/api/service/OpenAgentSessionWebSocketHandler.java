@@ -249,6 +249,9 @@ public class OpenAgentSessionWebSocketHandler extends AbstractWebSocketHandler {
         }
         if (message instanceof TextMessage textMessage) {
             recordUpstreamFrame(context, textMessage.getPayload());
+            if (!shouldForwardTextPayloadToClient(textMessage.getPayload())) {
+                return;
+            }
         }
         try {
             synchronized (clientSession) {
@@ -256,6 +259,22 @@ public class OpenAgentSessionWebSocketHandler extends AbstractWebSocketHandler {
             }
         } catch (IOException ex) {
             closeAndCleanup(clientSessionId, CloseStatus.SERVER_ERROR);
+        }
+    }
+
+    private boolean shouldForwardTextPayloadToClient(String payload) {
+        if (!StringUtils.hasText(payload)) {
+            return true;
+        }
+        try {
+            Map<String, Object> parsed = jsonParser.parseMap(payload);
+            Object eventTypeValue = parsed.get("eventType");
+            if (!(eventTypeValue instanceof String eventType)) {
+                return true;
+            }
+            return !"debug".equalsIgnoreCase(eventType.trim());
+        } catch (JsonParseException ignored) {
+            return true;
         }
     }
 
