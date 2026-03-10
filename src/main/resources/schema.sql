@@ -112,7 +112,7 @@ create index if not exists idx_instance_runtime_config_updated_at on instance_ru
 create table if not exists open_client_app (
     app_id varchar(64) primary key,
     name varchar(128) not null,
-    app_secret_hash varchar(255) not null,
+    app_secret varchar(255) not null,
     enabled boolean not null default true,
     default_instance_id uuid null references claw_instance (id) on delete set null,
     default_agent_id varchar(128) null,
@@ -124,7 +124,7 @@ alter table open_client_app
     add column if not exists name varchar(128);
 
 alter table open_client_app
-    add column if not exists app_secret_hash varchar(255);
+    add column if not exists app_secret varchar(255);
 
 alter table open_client_app
     add column if not exists enabled boolean not null default true;
@@ -141,6 +141,15 @@ alter table open_client_app
 alter table open_client_app
     add column if not exists updated_at timestamptz;
 
+-- migrate: rename app_secret_hash to app_secret if old column exists
+do $$
+begin
+    if exists (select 1 from information_schema.columns where table_name = 'open_client_app' and column_name = 'app_secret_hash')
+       and not exists (select 1 from information_schema.columns where table_name = 'open_client_app' and column_name = 'app_secret') then
+        alter table open_client_app rename column app_secret_hash to app_secret;
+    end if;
+end $$;
+
 update open_client_app
 set name = app_id
 where name is null;
@@ -149,11 +158,11 @@ alter table open_client_app
     alter column name set not null;
 
 update open_client_app
-set app_secret_hash = ''
-where app_secret_hash is null;
+set app_secret = ''
+where app_secret is null;
 
 alter table open_client_app
-    alter column app_secret_hash set not null;
+    alter column app_secret set not null;
 
 update open_client_app
 set created_at = now()

@@ -19,7 +19,7 @@ public class OpenClientAppRepository {
     private final RowMapper<OpenClientAppRecord> rowMapper = (rs, rowNum) -> new OpenClientAppRecord(
             rs.getString("app_id"),
             rs.getString("name"),
-            rs.getString("app_secret_hash"),
+            rs.getString("app_secret"),
             rs.getBoolean("enabled"),
             rs.getObject("default_instance_id", UUID.class),
             rs.getString("default_agent_id"),
@@ -33,7 +33,7 @@ public class OpenClientAppRepository {
 
     public Optional<OpenClientAppRecord> findEnabledByAppId(String appId) {
         List<OpenClientAppRecord> rows = jdbcTemplate.query("""
-                        select app_id, name, app_secret_hash, enabled, default_instance_id, default_agent_id, created_at, updated_at
+                        select app_id, name, app_secret, enabled, default_instance_id, default_agent_id, created_at, updated_at
                         from open_client_app
                         where app_id = ?
                           and enabled = true
@@ -46,7 +46,7 @@ public class OpenClientAppRepository {
 
     public List<OpenClientAppRecord> findAll() {
         return jdbcTemplate.query("""
-                        select app_id, name, app_secret_hash, enabled, default_instance_id, default_agent_id, created_at, updated_at
+                        select app_id, name, app_secret, enabled, default_instance_id, default_agent_id, created_at, updated_at
                         from open_client_app
                         order by created_at desc
                         """,
@@ -56,7 +56,7 @@ public class OpenClientAppRepository {
 
     public Optional<OpenClientAppRecord> findByAppId(String appId) {
         List<OpenClientAppRecord> rows = jdbcTemplate.query("""
-                        select app_id, name, app_secret_hash, enabled, default_instance_id, default_agent_id, created_at, updated_at
+                        select app_id, name, app_secret, enabled, default_instance_id, default_agent_id, created_at, updated_at
                         from open_client_app
                         where app_id = ?
                         """,
@@ -66,13 +66,13 @@ public class OpenClientAppRepository {
         return rows.stream().findFirst();
     }
 
-    public void insert(String appId, String name, String appSecretHash, boolean enabled,
+    public void insert(String appId, String name, String appSecret, boolean enabled,
                        UUID defaultInstanceId, String defaultAgentId, Instant now) {
         jdbcTemplate.update("""
-                        insert into open_client_app (app_id, name, app_secret_hash, enabled, default_instance_id, default_agent_id, created_at, updated_at)
+                        insert into open_client_app (app_id, name, app_secret, enabled, default_instance_id, default_agent_id, created_at, updated_at)
                         values (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
-                appId, name, appSecretHash, enabled,
+                appId, name, appSecret, enabled,
                 defaultInstanceId, defaultAgentId,
                 Timestamp.from(now), Timestamp.from(now)
         );

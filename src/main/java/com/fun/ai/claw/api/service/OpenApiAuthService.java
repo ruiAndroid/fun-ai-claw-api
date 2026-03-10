@@ -37,7 +37,7 @@ public class OpenApiAuthService {
         }
         OpenClientAppRecord app = openClientAppRepository.findEnabledByAppId(appId.trim())
                 .orElseThrow(() -> unauthorized("open app not found or disabled"));
-        if (!matchesSecret(app.appSecretHash(), appSecret.trim())) {
+        if (!appSecret.trim().equals(app.appSecret())) {
             throw unauthorized("invalid open api credentials");
         }
         return app;
@@ -55,17 +55,6 @@ public class OpenApiAuthService {
             throw new IllegalArgumentException("token must not be blank");
         }
         return sha256Hex(plainToken.trim());
-    }
-
-    private boolean matchesSecret(String storedSecretHash, String presentedSecret) {
-        if (!StringUtils.hasText(storedSecretHash) || !StringUtils.hasText(presentedSecret)) {
-            return false;
-        }
-        String normalized = storedSecretHash.trim();
-        if (normalized.regionMatches(true, 0, "sha256:", 0, 7)) {
-            return sha256Hex(presentedSecret).equalsIgnoreCase(normalized.substring(7).trim());
-        }
-        return normalized.equals(presentedSecret);
     }
 
     private String sha256Hex(String value) {

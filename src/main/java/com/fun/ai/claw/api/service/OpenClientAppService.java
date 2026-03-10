@@ -12,9 +12,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.HexFormat;
@@ -41,13 +38,12 @@ public class OpenClientAppService {
     public OpenClientAppCreateResponse createApp(OpenClientAppCreateRequest request) {
         String appId = generateAppId();
         String plainSecret = generateSecret();
-        String secretHash = "sha256:" + sha256Hex(plainSecret);
         Instant now = Instant.now();
 
         repository.insert(
                 appId,
                 request.name() != null ? request.name() : appId,
-                secretHash,
+                plainSecret,
                 true,
                 request.defaultInstanceId(),
                 request.defaultAgentId(),
@@ -97,15 +93,5 @@ public class OpenClientAppService {
         byte[] bytes = new byte[32];
         secureRandom.nextBytes(bytes);
         return HexFormat.of().formatHex(bytes);
-    }
-
-    private String sha256Hex(String value) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] bytes = digest.digest(value.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(bytes);
-        } catch (NoSuchAlgorithmException ex) {
-            throw new IllegalStateException("SHA-256 is not available", ex);
-        }
     }
 }

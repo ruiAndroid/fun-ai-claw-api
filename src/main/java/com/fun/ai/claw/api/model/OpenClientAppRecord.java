@@ -6,7 +6,7 @@ import java.util.UUID;
 public record OpenClientAppRecord(
         String appId,
         String name,
-        String appSecretHash,
+        String appSecret,
         boolean enabled,
         UUID defaultInstanceId,
         String defaultAgentId,
