@@ -15,6 +15,7 @@ import com.fun.ai.claw.api.model.UpsertInstanceConfigRequest;
 import com.fun.ai.claw.api.model.UpsertInstanceMainAgentGuidanceRequest;
 import com.fun.ai.claw.api.service.ControlService;
 import com.fun.ai.claw.api.service.InstanceAgentService;
+import com.fun.ai.claw.api.service.InstanceConfigMutationService;
 import com.fun.ai.claw.api.service.InstanceConfigService;
 import com.fun.ai.claw.api.service.InstanceMainAgentGuidanceService;
 import com.fun.ai.claw.api.service.InstanceSkillService;
@@ -43,19 +44,22 @@ public class InstanceController {
     private final InstanceSkillService instanceSkillService;
     private final InstanceMainAgentGuidanceService instanceMainAgentGuidanceService;
     private final InstanceConfigService instanceConfigService;
+    private final InstanceConfigMutationService instanceConfigMutationService;
 
     public InstanceController(ControlService controlService,
                               PairingCodeService pairingCodeService,
                               InstanceAgentService instanceAgentService,
                               InstanceSkillService instanceSkillService,
                               InstanceMainAgentGuidanceService instanceMainAgentGuidanceService,
-                              InstanceConfigService instanceConfigService) {
+                              InstanceConfigService instanceConfigService,
+                              InstanceConfigMutationService instanceConfigMutationService) {
         this.controlService = controlService;
         this.pairingCodeService = pairingCodeService;
         this.instanceAgentService = instanceAgentService;
         this.instanceSkillService = instanceSkillService;
         this.instanceMainAgentGuidanceService = instanceMainAgentGuidanceService;
         this.instanceConfigService = instanceConfigService;
+        this.instanceConfigMutationService = instanceConfigMutationService;
     }
 
     @GetMapping
@@ -105,12 +109,12 @@ public class InstanceController {
     @PutMapping("/{instanceId}/config")
     public InstanceConfigResponse upsertInstanceConfig(@PathVariable UUID instanceId,
                                                        @RequestBody UpsertInstanceConfigRequest request) {
-        return instanceConfigService.upsert(instanceId, request);
+        return instanceConfigMutationService.upsert(instanceId, request);
     }
 
     @DeleteMapping("/{instanceId}/config")
     public InstanceConfigResponse deleteInstanceConfigOverride(@PathVariable UUID instanceId) {
-        return instanceConfigService.deleteOverride(instanceId);
+        return instanceConfigMutationService.deleteOverride(instanceId);
     }
 
     @GetMapping("/{instanceId}/main-agent-guidance")
