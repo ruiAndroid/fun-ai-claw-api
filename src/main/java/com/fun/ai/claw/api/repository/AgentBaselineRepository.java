@@ -1,4 +1,4 @@
-package com.fun.ai.claw.api.repository;
+﻿package com.fun.ai.claw.api.repository;
 
 import com.fun.ai.claw.api.model.AgentBaselineRecord;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -27,7 +27,6 @@ public class AgentBaselineRepository {
             rs.getString("model"),
             rs.getObject("temperature", Double.class),
             rs.getObject("agentic", Boolean.class),
-            rs.getString("allowed_tools_json"),
             rs.getString("system_prompt"),
             rs.getString("updated_by"),
             rs.getTimestamp("created_at").toInstant(),
@@ -51,7 +50,6 @@ public class AgentBaselineRepository {
                                model,
                                temperature,
                                agentic,
-                               allowed_tools_json,
                                system_prompt,
                                updated_by,
                                created_at,
@@ -76,7 +74,6 @@ public class AgentBaselineRepository {
                                model,
                                temperature,
                                agentic,
-                               allowed_tools_json,
                                system_prompt,
                                updated_by,
                                created_at,
@@ -116,13 +113,12 @@ public class AgentBaselineRepository {
                             model,
                             temperature,
                             agentic,
-                            allowed_tools_json,
                             system_prompt,
                             updated_by,
                             created_at,
                             updated_at
                         )
-                        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         on conflict (agent_key) do update
                         set display_name = excluded.display_name,
                             description = excluded.description,
@@ -134,7 +130,6 @@ public class AgentBaselineRepository {
                             model = excluded.model,
                             temperature = excluded.temperature,
                             agentic = excluded.agentic,
-                            allowed_tools_json = excluded.allowed_tools_json,
                             system_prompt = excluded.system_prompt,
                             updated_by = excluded.updated_by,
                             updated_at = excluded.updated_at
@@ -150,7 +145,6 @@ public class AgentBaselineRepository {
                 record.model(),
                 record.temperature(),
                 record.agentic(),
-                record.allowedToolsJson(),
                 record.systemPrompt(),
                 record.updatedBy(),
                 Timestamp.from(record.createdAt() != null ? record.createdAt() : now),

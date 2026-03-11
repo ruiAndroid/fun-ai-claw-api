@@ -14,7 +14,6 @@ public record AgentBaselineRecord(
         String model,
         Double temperature,
         Boolean agentic,
-        String allowedToolsJson,
         String systemPrompt,
         String updatedBy,
         Instant createdAt,

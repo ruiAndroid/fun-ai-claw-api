@@ -347,7 +347,6 @@ create table if not exists agent_baseline (
     model varchar(255) null,
     temperature double precision null,
     agentic boolean null,
-    allowed_tools_json text null,
     system_prompt text null,
     updated_by varchar(128) null,
     created_at timestamptz not null,
@@ -391,7 +390,7 @@ alter table agent_baseline
     add column if not exists agentic boolean null;
 
 alter table agent_baseline
-    add column if not exists allowed_tools_json text null;
+    add column if not exists system_prompt text null;
 
 alter table agent_baseline
     drop column if exists entry_skill;
@@ -400,7 +399,7 @@ alter table agent_baseline
     drop column if exists skill_ids_json;
 
 alter table agent_baseline
-    add column if not exists system_prompt text null;
+    drop column if exists allowed_tools_json;
 
 alter table agent_baseline
     add column if not exists updated_by varchar(128) null;

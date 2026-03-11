@@ -1,7 +1,5 @@
 package com.fun.ai.claw.api.model;
 
-import java.util.List;
-
 public record AgentBaselineUpsertRequest(
         String agentKey,
         String displayName,
@@ -14,7 +12,6 @@ public record AgentBaselineUpsertRequest(
         String model,
         Double temperature,
         Boolean agentic,
-        List<String> allowedTools,
         String systemPrompt,
         String updatedBy
 ) {

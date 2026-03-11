@@ -1,4 +1,4 @@
-package com.fun.ai.claw.api.service;
+﻿package com.fun.ai.claw.api.service;
 
 import com.fun.ai.claw.api.model.AgentBaselineRecord;
 import com.fun.ai.claw.api.model.AgentBaselineResponse;
@@ -13,7 +13,6 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
-import java.util.LinkedHashSet;
 import java.util.List;
 
 @Service
@@ -75,7 +74,6 @@ public class AgentBaselineService {
                 trimToNull(request.model()),
                 request.temperature(),
                 request.agentic(),
-                writeStringList(normalizeList(request.allowedTools())),
                 trimToNull(request.systemPrompt()),
                 trimToNull(request.updatedBy()),
                 existing != null ? existing.createdAt() : now,
@@ -90,7 +88,6 @@ public class AgentBaselineService {
     }
 
     private AgentBaselineSummaryResponse toSummary(AgentBaselineRecord record) {
-        List<String> allowedTools = parseStringList(record.allowedToolsJson());
         return new AgentBaselineSummaryResponse(
                 record.agentKey(),
                 record.displayName(),
@@ -102,7 +99,6 @@ public class AgentBaselineService {
                 record.model(),
                 record.temperature(),
                 record.agentic(),
-                allowedTools.size(),
                 record.updatedBy(),
                 record.createdAt(),
                 record.updatedAt()
@@ -122,7 +118,6 @@ public class AgentBaselineService {
                 record.model(),
                 record.temperature(),
                 record.agentic(),
-                parseStringList(record.allowedToolsJson()),
                 record.systemPrompt(),
                 record.updatedBy(),
                 record.createdAt(),
@@ -175,63 +170,5 @@ public class AgentBaselineService {
             }
         }
         return null;
-    }
-
-    private List<String> normalizeList(List<String> values) {
-        if (values == null || values.isEmpty()) {
-            return List.of();
-        }
-        LinkedHashSet<String> ordered = new LinkedHashSet<>();
-        for (String value : values) {
-            String normalized = trimToNull(value);
-            if (normalized != null) {
-                ordered.add(normalized);
-            }
-        }
-        return List.copyOf(ordered);
-    }
-
-    private List<String> parseStringList(String rawJson) {
-        String normalized = trimToNull(rawJson);
-        if (normalized == null || "[]".equals(normalized)) {
-            return List.of();
-        }
-        List<String> values = new java.util.ArrayList<>();
-        String body = normalized;
-        if (body.startsWith("[") && body.endsWith("]")) {
-            body = body.substring(1, body.length() - 1);
-        }
-        if (body.isBlank()) {
-            return List.of();
-        }
-        for (String part : body.split(",")) {
-            String value = part.trim();
-            if (value.startsWith("\"") && value.endsWith("\"") && value.length() >= 2) {
-                value = value.substring(1, value.length() - 1);
-            }
-            value = value.replace("\\\"", "\"").replace("\\\\", "\\");
-            if (StringUtils.hasText(value)) {
-                values.add(value);
-            }
-        }
-        return normalizeList(values);
-    }
-
-    private String writeStringList(List<String> values) {
-        List<String> normalized = normalizeList(values);
-        if (normalized.isEmpty()) {
-            return "[]";
-        }
-        StringBuilder builder = new StringBuilder("[");
-        for (int index = 0; index < normalized.size(); index++) {
-            if (index > 0) {
-                builder.append(',');
-            }
-            builder.append('"')
-                    .append(normalized.get(index).replace("\\", "\\\\").replace("\"", "\\\""))
-                    .append('"');
-        }
-        builder.append(']');
-        return builder.toString();
     }
 }
