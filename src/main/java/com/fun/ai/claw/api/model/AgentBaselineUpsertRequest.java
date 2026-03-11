@@ -14,9 +14,7 @@ public record AgentBaselineUpsertRequest(
         String model,
         Double temperature,
         Boolean agentic,
-        String entrySkill,
         List<String> allowedTools,
-        List<String> skillIds,
         String systemPrompt,
         String updatedBy
 ) {

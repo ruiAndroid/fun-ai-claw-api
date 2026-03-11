@@ -13,9 +13,7 @@ public record AgentBaselineSummaryResponse(
         String model,
         Double temperature,
         Boolean agentic,
-        String entrySkill,
         int allowedToolCount,
-        int skillCount,
         String updatedBy,
         Instant createdAt,
         Instant updatedAt

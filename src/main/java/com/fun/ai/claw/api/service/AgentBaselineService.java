@@ -75,9 +75,7 @@ public class AgentBaselineService {
                 trimToNull(request.model()),
                 request.temperature(),
                 request.agentic(),
-                trimToNull(request.entrySkill()),
                 writeStringList(normalizeList(request.allowedTools())),
-                writeStringList(normalizeList(request.skillIds())),
                 trimToNull(request.systemPrompt()),
                 trimToNull(request.updatedBy()),
                 existing != null ? existing.createdAt() : now,
@@ -93,7 +91,6 @@ public class AgentBaselineService {
 
     private AgentBaselineSummaryResponse toSummary(AgentBaselineRecord record) {
         List<String> allowedTools = parseStringList(record.allowedToolsJson());
-        List<String> skillIds = parseStringList(record.skillIdsJson());
         return new AgentBaselineSummaryResponse(
                 record.agentKey(),
                 record.displayName(),
@@ -105,9 +102,7 @@ public class AgentBaselineService {
                 record.model(),
                 record.temperature(),
                 record.agentic(),
-                record.entrySkill(),
                 allowedTools.size(),
-                skillIds.size(),
                 record.updatedBy(),
                 record.createdAt(),
                 record.updatedAt()
@@ -127,9 +122,7 @@ public class AgentBaselineService {
                 record.model(),
                 record.temperature(),
                 record.agentic(),
-                record.entrySkill(),
                 parseStringList(record.allowedToolsJson()),
-                parseStringList(record.skillIdsJson()),
                 record.systemPrompt(),
                 record.updatedBy(),
                 record.createdAt(),
