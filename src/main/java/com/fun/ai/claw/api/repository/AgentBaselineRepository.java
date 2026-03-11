@@ -130,7 +130,7 @@ public class AgentBaselineRepository {
                             created_at,
                             updated_at
                         )
-                        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         on conflict (agent_key) do update
                         set display_name = excluded.display_name,
                             description = excluded.description,
