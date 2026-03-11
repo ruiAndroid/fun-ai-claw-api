@@ -343,3 +343,128 @@ alter table open_session_message
     alter column created_at set not null;
 
 create index if not exists idx_open_session_message_session_id on open_session_message (session_id, created_at asc);
+
+create table if not exists agent_baseline (
+    agent_key varchar(128) primary key,
+    display_name varchar(128) not null,
+    description text null,
+    runtime varchar(64) not null,
+    source_type varchar(32) not null,
+    source_ref text null,
+    enabled boolean not null default true,
+    manifest_json text null,
+    main_agents_md text null,
+    provider varchar(255) null,
+    model varchar(255) null,
+    temperature double precision null,
+    agentic boolean null,
+    entry_skill varchar(128) null,
+    allowed_tools_json text null,
+    skill_ids_json text null,
+    system_prompt text null,
+    updated_by varchar(128) null,
+    created_at timestamptz not null,
+    updated_at timestamptz not null
+);
+
+alter table agent_baseline
+    add column if not exists display_name varchar(128);
+
+alter table agent_baseline
+    add column if not exists description text null;
+
+alter table agent_baseline
+    add column if not exists runtime varchar(64);
+
+alter table agent_baseline
+    add column if not exists source_type varchar(32);
+
+alter table agent_baseline
+    add column if not exists source_ref text null;
+
+alter table agent_baseline
+    add column if not exists enabled boolean not null default true;
+
+alter table agent_baseline
+    add column if not exists manifest_json text null;
+
+alter table agent_baseline
+    add column if not exists main_agents_md text null;
+
+alter table agent_baseline
+    add column if not exists provider varchar(255) null;
+
+alter table agent_baseline
+    add column if not exists model varchar(255) null;
+
+alter table agent_baseline
+    add column if not exists temperature double precision null;
+
+alter table agent_baseline
+    add column if not exists agentic boolean null;
+
+alter table agent_baseline
+    add column if not exists entry_skill varchar(128) null;
+
+alter table agent_baseline
+    add column if not exists allowed_tools_json text null;
+
+alter table agent_baseline
+    add column if not exists skill_ids_json text null;
+
+alter table agent_baseline
+    add column if not exists system_prompt text null;
+
+alter table agent_baseline
+    add column if not exists updated_by varchar(128) null;
+
+alter table agent_baseline
+    add column if not exists created_at timestamptz;
+
+alter table agent_baseline
+    add column if not exists updated_at timestamptz;
+
+update agent_baseline
+set display_name = agent_key
+where display_name is null;
+
+alter table agent_baseline
+    alter column display_name set not null;
+
+update agent_baseline
+set runtime = 'zeroclaw'
+where runtime is null;
+
+alter table agent_baseline
+    alter column runtime set not null;
+
+update agent_baseline
+set source_type = 'MANUAL'
+where source_type is null;
+
+alter table agent_baseline
+    alter column source_type set not null;
+
+update agent_baseline
+set enabled = true
+where enabled is null;
+
+alter table agent_baseline
+    alter column enabled set not null;
+
+update agent_baseline
+set created_at = now()
+where created_at is null;
+
+alter table agent_baseline
+    alter column created_at set not null;
+
+update agent_baseline
+set updated_at = now()
+where updated_at is null;
+
+alter table agent_baseline
+    alter column updated_at set not null;
+
+create index if not exists idx_agent_baseline_updated_at on agent_baseline (updated_at desc);
+create index if not exists idx_agent_baseline_enabled on agent_baseline (enabled);
