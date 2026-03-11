@@ -457,3 +457,88 @@ alter table agent_baseline
 
 create index if not exists idx_agent_baseline_updated_at on agent_baseline (updated_at desc);
 create index if not exists idx_agent_baseline_enabled on agent_baseline (enabled);
+
+create table if not exists skill_baseline (
+    skill_key varchar(128) primary key,
+    display_name varchar(128) not null,
+    description text null,
+    source_type varchar(32) not null,
+    source_ref text null,
+    enabled boolean not null default true,
+    skill_md text not null,
+    updated_by varchar(128) null,
+    created_at timestamptz not null,
+    updated_at timestamptz not null
+);
+
+alter table skill_baseline
+    add column if not exists display_name varchar(128);
+
+alter table skill_baseline
+    add column if not exists description text null;
+
+alter table skill_baseline
+    add column if not exists source_type varchar(32);
+
+alter table skill_baseline
+    add column if not exists source_ref text null;
+
+alter table skill_baseline
+    add column if not exists enabled boolean not null default true;
+
+alter table skill_baseline
+    add column if not exists skill_md text;
+
+alter table skill_baseline
+    add column if not exists updated_by varchar(128) null;
+
+alter table skill_baseline
+    add column if not exists created_at timestamptz;
+
+alter table skill_baseline
+    add column if not exists updated_at timestamptz;
+
+update skill_baseline
+set display_name = skill_key
+where display_name is null;
+
+alter table skill_baseline
+    alter column display_name set not null;
+
+update skill_baseline
+set source_type = 'MANUAL'
+where source_type is null;
+
+alter table skill_baseline
+    alter column source_type set not null;
+
+update skill_baseline
+set enabled = true
+where enabled is null;
+
+alter table skill_baseline
+    alter column enabled set not null;
+
+update skill_baseline
+set skill_md = ''
+where skill_md is null;
+
+alter table skill_baseline
+    alter column skill_md set not null;
+
+update skill_baseline
+set created_at = now()
+where created_at is null;
+
+alter table skill_baseline
+    alter column created_at set not null;
+
+update skill_baseline
+set updated_at = now()
+where updated_at is null;
+
+alter table skill_baseline
+    alter column updated_at set not null;
+
+create index if not exists idx_skill_baseline_updated_at on skill_baseline (updated_at desc);
+create index if not exists idx_skill_baseline_enabled on skill_baseline (enabled);
