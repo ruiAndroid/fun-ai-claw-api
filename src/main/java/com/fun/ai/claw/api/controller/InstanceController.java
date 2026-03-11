@@ -11,9 +11,11 @@ import com.fun.ai.claw.api.model.ListResponse;
 import com.fun.ai.claw.api.model.ClawInstanceDto;
 import com.fun.ai.claw.api.model.PairingCodeResponse;
 import com.fun.ai.claw.api.model.SkillDescriptorResponse;
+import com.fun.ai.claw.api.model.UpsertAgentSystemPromptRequest;
 import com.fun.ai.claw.api.model.UpsertInstanceConfigRequest;
 import com.fun.ai.claw.api.model.UpsertInstanceMainAgentGuidanceRequest;
 import com.fun.ai.claw.api.service.ControlService;
+import com.fun.ai.claw.api.service.InstanceAgentPromptMutationService;
 import com.fun.ai.claw.api.service.InstanceAgentService;
 import com.fun.ai.claw.api.service.InstanceConfigMutationService;
 import com.fun.ai.claw.api.service.InstanceConfigService;
@@ -41,6 +43,7 @@ public class InstanceController {
     private final ControlService controlService;
     private final PairingCodeService pairingCodeService;
     private final InstanceAgentService instanceAgentService;
+    private final InstanceAgentPromptMutationService instanceAgentPromptMutationService;
     private final InstanceSkillService instanceSkillService;
     private final InstanceMainAgentGuidanceService instanceMainAgentGuidanceService;
     private final InstanceConfigService instanceConfigService;
@@ -49,6 +52,7 @@ public class InstanceController {
     public InstanceController(ControlService controlService,
                               PairingCodeService pairingCodeService,
                               InstanceAgentService instanceAgentService,
+                              InstanceAgentPromptMutationService instanceAgentPromptMutationService,
                               InstanceSkillService instanceSkillService,
                               InstanceMainAgentGuidanceService instanceMainAgentGuidanceService,
                               InstanceConfigService instanceConfigService,
@@ -56,6 +60,7 @@ public class InstanceController {
         this.controlService = controlService;
         this.pairingCodeService = pairingCodeService;
         this.instanceAgentService = instanceAgentService;
+        this.instanceAgentPromptMutationService = instanceAgentPromptMutationService;
         this.instanceSkillService = instanceSkillService;
         this.instanceMainAgentGuidanceService = instanceMainAgentGuidanceService;
         this.instanceConfigService = instanceConfigService;
@@ -94,6 +99,13 @@ public class InstanceController {
     public AgentSystemPromptResponse getAgentSystemPrompt(@PathVariable UUID instanceId,
                                                           @PathVariable String agentId) {
         return instanceAgentService.getAgentSystemPrompt(instanceId, agentId);
+    }
+
+    @PutMapping("/{instanceId}/agents/{agentId}/system-prompt")
+    public AgentSystemPromptResponse upsertAgentSystemPrompt(@PathVariable UUID instanceId,
+                                                             @PathVariable String agentId,
+                                                             @RequestBody UpsertAgentSystemPromptRequest request) {
+        return instanceAgentPromptMutationService.upsertSystemPrompt(instanceId, agentId, request);
     }
 
     @GetMapping("/{instanceId}/skills")
