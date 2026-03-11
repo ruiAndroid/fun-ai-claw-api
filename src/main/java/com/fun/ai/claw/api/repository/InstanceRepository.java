@@ -1,7 +1,6 @@
 package com.fun.ai.claw.api.repository;
 
 import com.fun.ai.claw.api.model.ClawInstanceDto;
-import com.fun.ai.claw.api.model.InstanceActionType;
 import com.fun.ai.claw.api.model.InstanceDesiredState;
 import com.fun.ai.claw.api.model.InstanceRuntime;
 import com.fun.ai.claw.api.model.InstanceStatus;
@@ -138,22 +137,6 @@ public class InstanceRepository {
                         """,
                 instanceId
         );
-    }
-
-    public UUID insertAction(UUID instanceId, InstanceActionType action, String reason, Instant acceptedAt) {
-        UUID actionId = UUID.randomUUID();
-        jdbcTemplate.update("""
-                        insert into instance_action
-                        (id, instance_id, action, reason, accepted_at)
-                        values (?, ?, ?, ?, ?)
-                        """,
-                actionId,
-                instanceId,
-                action.name(),
-                reason,
-                Timestamp.from(acceptedAt)
-        );
-        return actionId;
     }
 }
 

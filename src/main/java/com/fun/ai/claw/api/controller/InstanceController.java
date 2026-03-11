@@ -1,6 +1,5 @@
 package com.fun.ai.claw.api.controller;
 
-import com.fun.ai.claw.api.model.AcceptedActionResponse;
 import com.fun.ai.claw.api.model.AgentDescriptorResponse;
 import com.fun.ai.claw.api.model.AgentSystemPromptResponse;
 import com.fun.ai.claw.api.model.CreateInstanceRequest;
@@ -79,10 +78,10 @@ public class InstanceController {
     }
 
     @PostMapping("/{instanceId}/actions")
-    @ResponseStatus(HttpStatus.ACCEPTED)
-    public AcceptedActionResponse submitAction(@PathVariable UUID instanceId,
-                                               @Valid @RequestBody InstanceActionRequest request) {
-        return controlService.submitInstanceAction(instanceId, request);
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void submitAction(@PathVariable UUID instanceId,
+                             @Valid @RequestBody InstanceActionRequest request) {
+        controlService.submitInstanceAction(instanceId, request);
     }
 
     @GetMapping("/{instanceId}/pairing-code")

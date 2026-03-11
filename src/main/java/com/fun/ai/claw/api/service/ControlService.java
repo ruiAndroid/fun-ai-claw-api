@@ -1,7 +1,6 @@
 package com.fun.ai.claw.api.service;
 
 import com.fun.ai.claw.api.config.ImageCatalogProperties;
-import com.fun.ai.claw.api.model.AcceptedActionResponse;
 import com.fun.ai.claw.api.model.ClawInstanceDto;
 import com.fun.ai.claw.api.model.CreateInstanceRequest;
 import com.fun.ai.claw.api.model.ImagePresetDto;
@@ -156,7 +155,7 @@ public class ControlService {
     }
 
     @Transactional(noRollbackFor = ResponseStatusException.class)
-    public AcceptedActionResponse submitInstanceAction(UUID instanceId, InstanceActionRequest request) {
+    public void submitInstanceAction(UUID instanceId, InstanceActionRequest request) {
         ClawInstanceDto instance = getInstance(instanceId);
         Instant now = Instant.now();
 
@@ -173,12 +172,6 @@ public class ControlService {
             ).execution();
         } catch (ResponseStatusException ex) {
             instanceRepository.updateState(instance.id(), InstanceStatus.ERROR, desiredState, now);
-            instanceRepository.insertAction(
-                    instance.id(),
-                    request.action(),
-                    failureReason(request.reason(), ex.getReason()),
-                    now
-            );
             throw ex;
         }
         InstanceStatus status = execution.succeeded()
@@ -186,12 +179,6 @@ public class ControlService {
                 : InstanceStatus.ERROR;
 
         instanceRepository.updateState(instance.id(), status, desiredState, now);
-        UUID actionTaskId = instanceRepository.insertAction(
-                instance.id(),
-                request.action(),
-                execution.succeeded() ? request.reason() : failureReason(request.reason(), execution.message()),
-                now
-        );
         if (!execution.succeeded()) {
             log.error("instance action failed by plane, instanceId={}, action={}, message={}",
                     instance.id(),
@@ -199,7 +186,6 @@ public class ControlService {
                     execution.message());
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "plane execution failed: " + execution.message());
         }
-        return new AcceptedActionResponse(actionTaskId, now);
     }
 
     @Transactional
@@ -265,14 +251,6 @@ public class ControlService {
             case STOP -> InstanceStatus.STOPPED;
             case START, RESTART, ROLLBACK -> InstanceStatus.RUNNING;
         };
-    }
-
-    private String failureReason(String reason, String executionMessage) {
-        String fallback = StringUtils.hasText(executionMessage) ? executionMessage : "plane execution failed";
-        if (!StringUtils.hasText(reason)) {
-            return "[FAILED] " + fallback;
-        }
-        return reason + " | [FAILED] " + fallback;
     }
 
     private int allocateGatewayPort(UUID hostId) {

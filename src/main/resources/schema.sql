@@ -20,16 +20,7 @@ create unique index if not exists uq_claw_instance_host_port
     on claw_instance (host_id, gateway_host_port)
     where gateway_host_port is not null;
 
-create table if not exists instance_action (
-    id uuid primary key,
-    instance_id uuid not null references claw_instance (id) on delete cascade,
-    action varchar(32) not null,
-    reason text null,
-    accepted_at timestamptz not null
-);
-
-create index if not exists idx_instance_action_instance_id on instance_action (instance_id);
-create index if not exists idx_instance_action_accepted_at on instance_action (accepted_at);
+drop table if exists instance_action;
 
 alter table if exists instance_agent_guidance rename to instance_main_prompt;
 alter index if exists idx_instance_agent_guidance_updated_at rename to idx_instance_main_prompt_updated_at;
