@@ -6,6 +6,7 @@ import com.fun.ai.claw.api.model.CreateInstanceRequest;
 import com.fun.ai.claw.api.model.InstanceActionRequest;
 import com.fun.ai.claw.api.model.InstanceConfigResponse;
 import com.fun.ai.claw.api.model.InstanceMainAgentGuidanceResponse;
+import com.fun.ai.claw.api.model.InstanceRoutingConfigResponse;
 import com.fun.ai.claw.api.model.ListResponse;
 import com.fun.ai.claw.api.model.ClawInstanceDto;
 import com.fun.ai.claw.api.model.PairingCodeResponse;
@@ -13,12 +14,14 @@ import com.fun.ai.claw.api.model.SkillDescriptorResponse;
 import com.fun.ai.claw.api.model.UpsertAgentSystemPromptRequest;
 import com.fun.ai.claw.api.model.UpsertInstanceConfigRequest;
 import com.fun.ai.claw.api.model.UpsertInstanceMainAgentGuidanceRequest;
+import com.fun.ai.claw.api.model.UpsertInstanceRoutingConfigRequest;
 import com.fun.ai.claw.api.service.ControlService;
 import com.fun.ai.claw.api.service.InstanceAgentPromptMutationService;
 import com.fun.ai.claw.api.service.InstanceAgentService;
 import com.fun.ai.claw.api.service.InstanceConfigMutationService;
 import com.fun.ai.claw.api.service.InstanceConfigService;
 import com.fun.ai.claw.api.service.InstanceMainAgentGuidanceService;
+import com.fun.ai.claw.api.service.InstanceRoutingConfigService;
 import com.fun.ai.claw.api.service.InstanceSkillService;
 import com.fun.ai.claw.api.service.PairingCodeService;
 import jakarta.validation.Valid;
@@ -47,6 +50,7 @@ public class InstanceController {
     private final InstanceMainAgentGuidanceService instanceMainAgentGuidanceService;
     private final InstanceConfigService instanceConfigService;
     private final InstanceConfigMutationService instanceConfigMutationService;
+    private final InstanceRoutingConfigService instanceRoutingConfigService;
 
     public InstanceController(ControlService controlService,
                               PairingCodeService pairingCodeService,
@@ -55,7 +59,8 @@ public class InstanceController {
                               InstanceSkillService instanceSkillService,
                               InstanceMainAgentGuidanceService instanceMainAgentGuidanceService,
                               InstanceConfigService instanceConfigService,
-                              InstanceConfigMutationService instanceConfigMutationService) {
+                              InstanceConfigMutationService instanceConfigMutationService,
+                              InstanceRoutingConfigService instanceRoutingConfigService) {
         this.controlService = controlService;
         this.pairingCodeService = pairingCodeService;
         this.instanceAgentService = instanceAgentService;
@@ -64,6 +69,7 @@ public class InstanceController {
         this.instanceMainAgentGuidanceService = instanceMainAgentGuidanceService;
         this.instanceConfigService = instanceConfigService;
         this.instanceConfigMutationService = instanceConfigMutationService;
+        this.instanceRoutingConfigService = instanceRoutingConfigService;
     }
 
     @GetMapping
@@ -128,6 +134,17 @@ public class InstanceController {
         return instanceConfigMutationService.deleteOverride(instanceId);
     }
 
+    @GetMapping("/{instanceId}/routing-config")
+    public InstanceRoutingConfigResponse getInstanceRoutingConfig(@PathVariable UUID instanceId) {
+        return instanceRoutingConfigService.get(instanceId);
+    }
+
+    @PutMapping("/{instanceId}/routing-config")
+    public InstanceRoutingConfigResponse upsertInstanceRoutingConfig(@PathVariable UUID instanceId,
+                                                                    @RequestBody UpsertInstanceRoutingConfigRequest request) {
+        return instanceRoutingConfigService.upsert(instanceId, request);
+    }
+
     @GetMapping("/{instanceId}/main-agent-guidance")
     public InstanceMainAgentGuidanceResponse getMainAgentGuidance(@PathVariable UUID instanceId) {
         return instanceMainAgentGuidanceService.get(instanceId);
@@ -150,4 +167,3 @@ public class InstanceController {
         controlService.deleteInstance(instanceId);
     }
 }
-
