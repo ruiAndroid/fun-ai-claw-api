@@ -12,7 +12,6 @@ public record AgentBaselineResponse(
         String sourceRef,
         boolean enabled,
         String manifestJson,
-        String mainAgentsMd,
         String provider,
         String model,
         Double temperature,

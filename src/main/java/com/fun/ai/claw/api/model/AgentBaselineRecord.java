@@ -11,7 +11,6 @@ public record AgentBaselineRecord(
         String sourceRef,
         boolean enabled,
         String manifestJson,
-        String mainAgentsMd,
         String provider,
         String model,
         Double temperature,
