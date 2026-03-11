@@ -3,6 +3,7 @@ package com.fun.ai.claw.api.service;
 import com.fun.ai.claw.api.model.AgentDescriptorResponse;
 import com.fun.ai.claw.api.model.AgentSystemPromptResponse;
 import com.fun.ai.claw.api.model.InstanceActionType;
+import com.fun.ai.claw.api.model.ManagedSkillAssetPayload;
 import com.fun.ai.claw.api.model.PairingCodeResponse;
 import com.fun.ai.claw.api.model.SkillDescriptorResponse;
 import org.springframework.beans.factory.annotation.Value;
@@ -30,19 +31,22 @@ public class PlaneClient {
     private static final String AGENTS_MD_OVERWRITE_PAYLOAD_KEY = "agentsMdOverwrite";
     private static final String CONFIG_TOML_CONTENT_PAYLOAD_KEY = "configTomlContent";
     private static final String CONFIG_TOML_OVERWRITE_PAYLOAD_KEY = "configTomlOverwrite";
+    private static final String MANAGED_SKILLS_PAYLOAD_KEY = "managedSkills";
 
     private final RestClient restClient;
     private final String planeBaseUrl;
     private final String requestedBy;
     private final InstanceMainAgentGuidanceService instanceMainAgentGuidanceService;
     private final InstanceConfigService instanceConfigService;
+    private final ManagedSkillAssetService managedSkillAssetService;
 
     public PlaneClient(@Value("${app.plane.base-url:http://127.0.0.1:8090/internal/v1}") String planeBaseUrl,
                        @Value("${app.plane.requested-by:fun-ai-claw-api}") String requestedBy,
-                       @Value("${app.plane.connect-timeout-seconds:3}") long connectTimeoutSeconds,
-                       @Value("${app.plane.request-timeout-seconds:90}") long requestTimeoutSeconds,
-                       InstanceMainAgentGuidanceService instanceMainAgentGuidanceService,
-                       InstanceConfigService instanceConfigService) {
+                        @Value("${app.plane.connect-timeout-seconds:3}") long connectTimeoutSeconds,
+                        @Value("${app.plane.request-timeout-seconds:90}") long requestTimeoutSeconds,
+                        InstanceMainAgentGuidanceService instanceMainAgentGuidanceService,
+                        InstanceConfigService instanceConfigService,
+                        ManagedSkillAssetService managedSkillAssetService) {
         long resolvedConnectTimeoutSeconds = connectTimeoutSeconds > 0 ? connectTimeoutSeconds : 3;
         long resolvedRequestTimeoutSeconds = requestTimeoutSeconds > 0 ? requestTimeoutSeconds : 90;
         HttpClient httpClient = HttpClient.newBuilder()
@@ -57,6 +61,7 @@ public class PlaneClient {
         this.requestedBy = requestedBy;
         this.instanceMainAgentGuidanceService = instanceMainAgentGuidanceService;
         this.instanceConfigService = instanceConfigService;
+        this.managedSkillAssetService = managedSkillAssetService;
     }
 
     public PlaneTaskExecutionRecord reconcileInstanceAction(UUID instanceId,
@@ -87,6 +92,7 @@ public class PlaneClient {
             } else if (runtimeConfig.overwriteOnStart()) {
                 payload.put(CONFIG_TOML_CONTENT_PAYLOAD_KEY, "");
             }
+            payload.put(MANAGED_SKILLS_PAYLOAD_KEY, managedSkillAssetService.listEnabledByInstanceId(instanceId));
         }
 
         PlaneReconcileRequest request = new PlaneReconcileRequest(
@@ -274,6 +280,7 @@ public class PlaneClient {
         try {
             restClient.post()
                     .uri(planeBaseUrl + "/instances/" + instanceId + "/skills/sync")
+                    .body(new PlaneSkillSyncRequest(managedSkillAssetService.listEnabledByInstanceId(instanceId)))
                     .retrieve()
                     .toBodilessEntity();
         } catch (RestClientResponseException ex) {
@@ -345,6 +352,11 @@ public class PlaneClient {
 
     private record PlaneSkillListResponse(
             List<SkillDescriptorResponse> items
+    ) {
+    }
+
+    private record PlaneSkillSyncRequest(
+            List<ManagedSkillAssetPayload> items
     ) {
     }
 }
