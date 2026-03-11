@@ -11,7 +11,6 @@ public record AgentBaselineResponse(
         String sourceType,
         String sourceRef,
         boolean enabled,
-        String manifestJson,
         String provider,
         String model,
         Double temperature,

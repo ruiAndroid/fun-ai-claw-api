@@ -343,7 +343,6 @@ create table if not exists agent_baseline (
     source_type varchar(32) not null,
     source_ref text null,
     enabled boolean not null default true,
-    manifest_json text null,
     provider varchar(255) null,
     model varchar(255) null,
     temperature double precision null,
@@ -376,10 +375,10 @@ alter table agent_baseline
     add column if not exists enabled boolean not null default true;
 
 alter table agent_baseline
-    add column if not exists manifest_json text null;
+    add column if not exists provider varchar(255) null;
 
 alter table agent_baseline
-    add column if not exists provider varchar(255) null;
+    drop column if exists manifest_json;
 
 alter table agent_baseline
     drop column if exists main_agents_md;

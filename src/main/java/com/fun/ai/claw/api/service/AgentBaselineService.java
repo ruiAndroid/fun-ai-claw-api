@@ -13,16 +13,11 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 @Service
 public class AgentBaselineService {
-
-    private static final Pattern JSON_ARRAY_ITEM_PATTERN = Pattern.compile("\"((?:\\\\.|[^\"\\\\])*)\"");
 
     private final AgentBaselineRepository repository;
 
@@ -66,43 +61,23 @@ public class AgentBaselineService {
 
     private AgentBaselineResponse saveBaseline(String agentKey, AgentBaselineUpsertRequest request) {
         AgentBaselineRecord existing = repository.findByAgentKey(agentKey).orElse(null);
-        String normalizedManifestJson = normalizeManifestJson(request.manifestJson());
-        String manifestAgentId = trimToNull(extractJsonStringField(normalizedManifestJson, "agent_id"));
-        if (StringUtils.hasText(manifestAgentId) && !agentKey.equals(manifestAgentId)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "manifest agent_id does not match target agent key: " + manifestAgentId);
-        }
-
-        List<String> normalizedSkillIds = normalizeList(request.skillIds());
-        if (normalizedSkillIds.isEmpty()) {
-            normalizedSkillIds = extractJsonStringArray(normalizedManifestJson, "skills");
-        }
-
-        String runtime = firstNonBlank(request.runtime(), extractJsonStringField(normalizedManifestJson, "runtime"), "zeroclaw");
-        String displayName = firstNonBlank(request.displayName(), agentKey);
-        String sourceType = firstNonBlank(request.sourceType(), "MANUAL");
-        Boolean enabledValue = request.enabled() != null ? request.enabled() : true;
-        Boolean agenticValue = request.agentic() != null ? request.agentic() : extractJsonBooleanField(normalizedManifestJson, "agentic");
-        String entrySkill = firstNonBlank(request.entrySkill(), extractJsonStringField(normalizedManifestJson, "entry_skill"));
-        List<String> normalizedAllowedTools = normalizeList(request.allowedTools());
         Instant now = Instant.now();
 
         AgentBaselineRecord record = new AgentBaselineRecord(
                 agentKey,
-                displayName,
+                firstNonBlank(request.displayName(), agentKey),
                 trimToNull(request.description()),
-                runtime,
-                sourceType,
+                firstNonBlank(request.runtime(), "zeroclaw"),
+                firstNonBlank(request.sourceType(), "MANUAL"),
                 trimToNull(request.sourceRef()),
-                enabledValue,
-                normalizedManifestJson,
+                request.enabled() != null ? request.enabled() : true,
                 trimToNull(request.provider()),
                 trimToNull(request.model()),
                 request.temperature(),
-                agenticValue,
-                entrySkill,
-                writeStringList(normalizedAllowedTools),
-                writeStringList(normalizedSkillIds),
+                request.agentic(),
+                trimToNull(request.entrySkill()),
+                writeStringList(normalizeList(request.allowedTools())),
+                writeStringList(normalizeList(request.skillIds())),
                 trimToNull(request.systemPrompt()),
                 trimToNull(request.updatedBy()),
                 existing != null ? existing.createdAt() : now,
@@ -148,7 +123,6 @@ public class AgentBaselineService {
                 record.sourceType(),
                 record.sourceRef(),
                 record.enabled(),
-                record.manifestJson(),
                 record.provider(),
                 record.model(),
                 record.temperature(),
@@ -177,11 +151,6 @@ public class AgentBaselineService {
         String requestAgentKey = normalizeKey(request.agentKey());
         if (requestAgentKey != null) {
             return requestAgentKey;
-        }
-
-        String manifestAgentId = normalizeKey(extractJsonStringField(normalizeManifestJson(request.manifestJson()), "agent_id"));
-        if (manifestAgentId != null) {
-            return manifestAgentId;
         }
         throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "agentKey is required");
     }
@@ -215,53 +184,6 @@ public class AgentBaselineService {
         return null;
     }
 
-    private String normalizeManifestJson(String manifestJson) {
-        String normalized = trimToNull(manifestJson);
-        if (normalized == null) {
-            return null;
-        }
-        if (!(normalized.startsWith("{") && normalized.endsWith("}"))) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "manifest_json must be a JSON object");
-        }
-        return normalized;
-    }
-
-    private String extractJsonStringField(String json, String fieldName) {
-        if (!StringUtils.hasText(json)) {
-            return null;
-        }
-        Matcher matcher = Pattern.compile("\"" + Pattern.quote(fieldName) + "\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"")
-                .matcher(json);
-        if (!matcher.find()) {
-            return null;
-        }
-        return unescapeJsonString(matcher.group(1));
-    }
-
-    private Boolean extractJsonBooleanField(String json, String fieldName) {
-        if (!StringUtils.hasText(json)) {
-            return null;
-        }
-        Matcher matcher = Pattern.compile("\"" + Pattern.quote(fieldName) + "\"\\s*:\\s*(true|false)")
-                .matcher(json);
-        if (!matcher.find()) {
-            return null;
-        }
-        return Boolean.parseBoolean(matcher.group(1));
-    }
-
-    private List<String> extractJsonStringArray(String json, String fieldName) {
-        if (!StringUtils.hasText(json)) {
-            return List.of();
-        }
-        Matcher matcher = Pattern.compile("\"" + Pattern.quote(fieldName) + "\"\\s*:\\s*\\[(.*?)]", Pattern.DOTALL)
-                .matcher(json);
-        if (!matcher.find()) {
-            return List.of();
-        }
-        return parseStringList("[" + matcher.group(1) + "]");
-    }
-
     private List<String> normalizeList(List<String> values) {
         if (values == null || values.isEmpty()) {
             return List.of();
@@ -278,13 +200,26 @@ public class AgentBaselineService {
 
     private List<String> parseStringList(String rawJson) {
         String normalized = trimToNull(rawJson);
-        if (normalized == null) {
+        if (normalized == null || "[]".equals(normalized)) {
             return List.of();
         }
-        List<String> values = new ArrayList<>();
-        Matcher matcher = JSON_ARRAY_ITEM_PATTERN.matcher(normalized);
-        while (matcher.find()) {
-            values.add(unescapeJsonString(matcher.group(1)));
+        List<String> values = new java.util.ArrayList<>();
+        String body = normalized;
+        if (body.startsWith("[") && body.endsWith("]")) {
+            body = body.substring(1, body.length() - 1);
+        }
+        if (body.isBlank()) {
+            return List.of();
+        }
+        for (String part : body.split(",")) {
+            String value = part.trim();
+            if (value.startsWith("\"") && value.endsWith("\"") && value.length() >= 2) {
+                value = value.substring(1, value.length() - 1);
+            }
+            value = value.replace("\\\"", "\"").replace("\\\\", "\\");
+            if (StringUtils.hasText(value)) {
+                values.add(value);
+            }
         }
         return normalizeList(values);
     }
@@ -299,64 +234,11 @@ public class AgentBaselineService {
             if (index > 0) {
                 builder.append(',');
             }
-            builder.append('"').append(escapeJsonString(normalized.get(index))).append('"');
+            builder.append('"')
+                    .append(normalized.get(index).replace("\\", "\\\\").replace("\"", "\\\""))
+                    .append('"');
         }
         builder.append(']');
-        return builder.toString();
-    }
-
-    private String escapeJsonString(String value) {
-        return value
-                .replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\r", "\\r")
-                .replace("\n", "\\n")
-                .replace("\t", "\\t");
-    }
-
-    private String unescapeJsonString(String value) {
-        StringBuilder builder = new StringBuilder();
-        boolean escaping = false;
-        for (int index = 0; index < value.length(); index++) {
-            char current = value.charAt(index);
-            if (escaping) {
-                switch (current) {
-                    case '"' -> builder.append('"');
-                    case '\\' -> builder.append('\\');
-                    case '/' -> builder.append('/');
-                    case 'b' -> builder.append('\b');
-                    case 'f' -> builder.append('\f');
-                    case 'n' -> builder.append('\n');
-                    case 'r' -> builder.append('\r');
-                    case 't' -> builder.append('\t');
-                    case 'u' -> {
-                        if (index + 4 < value.length()) {
-                            String hex = value.substring(index + 1, index + 5);
-                            try {
-                                builder.append((char) Integer.parseInt(hex, 16));
-                                index += 4;
-                            } catch (NumberFormatException exception) {
-                                builder.append("\\u").append(hex);
-                                index += 4;
-                            }
-                        } else {
-                            builder.append("\\u");
-                        }
-                    }
-                    default -> builder.append(current);
-                }
-                escaping = false;
-                continue;
-            }
-            if (current == '\\') {
-                escaping = true;
-            } else {
-                builder.append(current);
-            }
-        }
-        if (escaping) {
-            builder.append('\\');
-        }
         return builder.toString();
     }
 }

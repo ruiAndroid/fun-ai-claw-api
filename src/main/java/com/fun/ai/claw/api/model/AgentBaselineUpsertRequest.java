@@ -10,7 +10,6 @@ public record AgentBaselineUpsertRequest(
         String sourceType,
         String sourceRef,
         Boolean enabled,
-        String manifestJson,
         String provider,
         String model,
         Double temperature,
