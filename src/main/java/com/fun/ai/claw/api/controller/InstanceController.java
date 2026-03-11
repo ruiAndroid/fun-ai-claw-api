@@ -7,6 +7,7 @@ import com.fun.ai.claw.api.model.InstanceActionRequest;
 import com.fun.ai.claw.api.model.InstanceConfigResponse;
 import com.fun.ai.claw.api.model.InstanceMainAgentGuidanceResponse;
 import com.fun.ai.claw.api.model.InstanceRoutingConfigResponse;
+import com.fun.ai.claw.api.model.InstanceSkillBindingResponse;
 import com.fun.ai.claw.api.model.ListResponse;
 import com.fun.ai.claw.api.model.ClawInstanceDto;
 import com.fun.ai.claw.api.model.PairingCodeResponse;
@@ -15,6 +16,7 @@ import com.fun.ai.claw.api.model.UpsertAgentSystemPromptRequest;
 import com.fun.ai.claw.api.model.UpsertInstanceConfigRequest;
 import com.fun.ai.claw.api.model.UpsertInstanceMainAgentGuidanceRequest;
 import com.fun.ai.claw.api.model.UpsertInstanceRoutingConfigRequest;
+import com.fun.ai.claw.api.model.UpsertInstanceSkillBindingRequest;
 import com.fun.ai.claw.api.service.ControlService;
 import com.fun.ai.claw.api.service.InstanceAgentPromptMutationService;
 import com.fun.ai.claw.api.service.InstanceAgentService;
@@ -22,6 +24,7 @@ import com.fun.ai.claw.api.service.InstanceConfigMutationService;
 import com.fun.ai.claw.api.service.InstanceConfigService;
 import com.fun.ai.claw.api.service.InstanceMainAgentGuidanceService;
 import com.fun.ai.claw.api.service.InstanceRoutingConfigService;
+import com.fun.ai.claw.api.service.InstanceSkillBindingService;
 import com.fun.ai.claw.api.service.InstanceSkillService;
 import com.fun.ai.claw.api.service.PairingCodeService;
 import jakarta.validation.Valid;
@@ -51,6 +54,7 @@ public class InstanceController {
     private final InstanceConfigService instanceConfigService;
     private final InstanceConfigMutationService instanceConfigMutationService;
     private final InstanceRoutingConfigService instanceRoutingConfigService;
+    private final InstanceSkillBindingService instanceSkillBindingService;
 
     public InstanceController(ControlService controlService,
                               PairingCodeService pairingCodeService,
@@ -60,7 +64,8 @@ public class InstanceController {
                               InstanceMainAgentGuidanceService instanceMainAgentGuidanceService,
                               InstanceConfigService instanceConfigService,
                               InstanceConfigMutationService instanceConfigMutationService,
-                              InstanceRoutingConfigService instanceRoutingConfigService) {
+                              InstanceRoutingConfigService instanceRoutingConfigService,
+                              InstanceSkillBindingService instanceSkillBindingService) {
         this.controlService = controlService;
         this.pairingCodeService = pairingCodeService;
         this.instanceAgentService = instanceAgentService;
@@ -70,6 +75,7 @@ public class InstanceController {
         this.instanceConfigService = instanceConfigService;
         this.instanceConfigMutationService = instanceConfigMutationService;
         this.instanceRoutingConfigService = instanceRoutingConfigService;
+        this.instanceSkillBindingService = instanceSkillBindingService;
     }
 
     @GetMapping
@@ -116,6 +122,25 @@ public class InstanceController {
     @GetMapping("/{instanceId}/skills")
     public ListResponse<SkillDescriptorResponse> listSkills(@PathVariable UUID instanceId) {
         return new ListResponse<>(instanceSkillService.listSkills(instanceId));
+    }
+
+    @GetMapping("/{instanceId}/skill-bindings")
+    public ListResponse<InstanceSkillBindingResponse> listSkillBindings(@PathVariable UUID instanceId) {
+        return instanceSkillBindingService.listBindings(instanceId);
+    }
+
+    @PutMapping("/{instanceId}/skill-bindings/{skillKey}")
+    public InstanceSkillBindingResponse installSkillBinding(@PathVariable UUID instanceId,
+                                                            @PathVariable String skillKey,
+                                                            @RequestBody(required = false) UpsertInstanceSkillBindingRequest request) {
+        return instanceSkillBindingService.install(instanceId, skillKey, request);
+    }
+
+    @DeleteMapping("/{instanceId}/skill-bindings/{skillKey}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void uninstallSkillBinding(@PathVariable UUID instanceId,
+                                      @PathVariable String skillKey) {
+        instanceSkillBindingService.uninstall(instanceId, skillKey);
     }
 
     @GetMapping("/{instanceId}/config")

@@ -37,18 +37,23 @@ public class InstanceConfigMutationService {
     @Transactional
     public InstanceConfigResponse upsert(UUID instanceId, UpsertInstanceConfigRequest request) {
         InstanceConfigResponse response = instanceConfigService.upsert(instanceId, request);
-        applyRuntimeConfigIfRunning(instanceId, response.configToml());
+        applyRuntimeConfigIfRunning(instanceId, response.configToml(), response.runtimeConfigPath());
         return response;
     }
 
     @Transactional
     public InstanceConfigResponse deleteOverride(UUID instanceId) {
         InstanceConfigResponse response = instanceConfigService.deleteOverride(instanceId);
-        applyRuntimeConfigIfRunning(instanceId, response.configToml());
+        applyRuntimeConfigIfRunning(instanceId, response.configToml(), response.runtimeConfigPath());
         return response;
     }
 
-    private void applyRuntimeConfigIfRunning(UUID instanceId, String configToml) {
+    public void applyResolvedRuntimeConfigIfRunning(UUID instanceId) {
+        InstanceConfigService.RuntimeConfig runtimeConfig = instanceConfigService.resolveRuntimeConfig(instanceId);
+        applyRuntimeConfigIfRunning(instanceId, runtimeConfig.content(), runtimeConfig.runtimeConfigPath());
+    }
+
+    private void applyRuntimeConfigIfRunning(UUID instanceId, String configToml, String runtimeConfigPath) {
         ClawInstanceDto instance = instanceRepository.findById(instanceId).orElse(null);
         if (instance == null) {
             return;
@@ -57,15 +62,17 @@ public class InstanceConfigMutationService {
             log.info("skip runtime config apply for instance {} because status is {}", instanceId, instance.status());
             return;
         }
-        String runtimeConfigPath = StringUtils.hasText(properties.getRuntimeConfigPath())
+        String resolvedRuntimeConfigPath = StringUtils.hasText(runtimeConfigPath)
+                ? runtimeConfigPath.trim()
+                : (StringUtils.hasText(properties.getRuntimeConfigPath())
                 ? properties.getRuntimeConfigPath().trim()
-                : "/data/zeroclaw/config.toml";
+                : "/data/zeroclaw/config.toml");
         planeClient.writeRuntimeFile(
                 instanceId,
-                runtimeConfigPath,
+                resolvedRuntimeConfigPath,
                 (configToml == null ? "" : configToml).getBytes(StandardCharsets.UTF_8),
                 true
         );
-        log.info("applied runtime config immediately for instance {} at {}", instanceId, runtimeConfigPath);
+        log.info("applied runtime config immediately for instance {} at {}", instanceId, resolvedRuntimeConfigPath);
     }
 }

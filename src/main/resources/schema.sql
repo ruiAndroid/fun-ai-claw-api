@@ -539,3 +539,38 @@ alter table skill_baseline
 
 create index if not exists idx_skill_baseline_updated_at on skill_baseline (updated_at desc);
 create index if not exists idx_skill_baseline_enabled on skill_baseline (enabled);
+
+create table if not exists instance_skill_binding (
+    instance_id uuid not null references claw_instance (id) on delete cascade,
+    skill_key varchar(128) not null references skill_baseline (skill_key) on delete cascade,
+    updated_by varchar(128) null,
+    created_at timestamptz not null,
+    updated_at timestamptz not null,
+    primary key (instance_id, skill_key)
+);
+
+alter table instance_skill_binding
+    add column if not exists updated_by varchar(128) null;
+
+alter table instance_skill_binding
+    add column if not exists created_at timestamptz;
+
+alter table instance_skill_binding
+    add column if not exists updated_at timestamptz;
+
+update instance_skill_binding
+set created_at = now()
+where created_at is null;
+
+alter table instance_skill_binding
+    alter column created_at set not null;
+
+update instance_skill_binding
+set updated_at = now()
+where updated_at is null;
+
+alter table instance_skill_binding
+    alter column updated_at set not null;
+
+create index if not exists idx_instance_skill_binding_skill_key on instance_skill_binding (skill_key);
+create index if not exists idx_instance_skill_binding_updated_at on instance_skill_binding (updated_at desc);

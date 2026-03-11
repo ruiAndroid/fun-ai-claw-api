@@ -270,6 +270,23 @@ public class PlaneClient {
         }
     }
 
+    public void syncInstanceSkills(UUID instanceId) {
+        try {
+            restClient.post()
+                    .uri(planeBaseUrl + "/instances/" + instanceId + "/skills/sync")
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (RestClientResponseException ex) {
+            throw mapPlaneQueryFailure("plane instance skill sync failed", ex);
+        } catch (ResourceAccessException ex) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_GATEWAY,
+                    "plane service unavailable: " + planeBaseUrl + "/instances/" + instanceId + "/skills/sync"
+                            + (StringUtils.hasText(ex.getMessage()) ? " (" + ex.getMessage() + ")" : "")
+            );
+        }
+    }
+
     private String buildRuntimeFileUri(UUID instanceId, String path, Boolean overwrite) {
         UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(planeBaseUrl)
                 .path("/instances/{instanceId}/files")

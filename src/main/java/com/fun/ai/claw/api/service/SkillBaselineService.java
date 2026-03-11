@@ -5,10 +5,10 @@ import com.fun.ai.claw.api.model.SkillBaselineRecord;
 import com.fun.ai.claw.api.model.SkillBaselineResponse;
 import com.fun.ai.claw.api.model.SkillBaselineSummaryResponse;
 import com.fun.ai.claw.api.model.SkillBaselineUpsertRequest;
+import com.fun.ai.claw.api.repository.InstanceSkillBindingRepository;
 import com.fun.ai.claw.api.repository.SkillBaselineRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -19,9 +19,18 @@ import java.util.List;
 public class SkillBaselineService {
 
     private final SkillBaselineRepository repository;
+    private final InstanceSkillBindingRepository instanceSkillBindingRepository;
+    private final PlaneClient planeClient;
+    private final InstanceConfigMutationService instanceConfigMutationService;
 
-    public SkillBaselineService(SkillBaselineRepository repository) {
+    public SkillBaselineService(SkillBaselineRepository repository,
+                                InstanceSkillBindingRepository instanceSkillBindingRepository,
+                                PlaneClient planeClient,
+                                InstanceConfigMutationService instanceConfigMutationService) {
         this.repository = repository;
+        this.instanceSkillBindingRepository = instanceSkillBindingRepository;
+        this.planeClient = planeClient;
+        this.instanceConfigMutationService = instanceConfigMutationService;
     }
 
     public ListResponse<SkillBaselineSummaryResponse> listBaselines() {
@@ -37,7 +46,6 @@ public class SkillBaselineService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "skill baseline not found: " + skillKey));
     }
 
-    @Transactional
     public SkillBaselineResponse createBaseline(SkillBaselineUpsertRequest request) {
         String skillKey = resolveSkillKey(null, request);
         if (repository.existsBySkillKey(skillKey)) {
@@ -46,16 +54,20 @@ public class SkillBaselineService {
         return saveBaseline(skillKey, request);
     }
 
-    @Transactional
     public SkillBaselineResponse upsertBaseline(String skillKey, SkillBaselineUpsertRequest request) {
-        return saveBaseline(resolveSkillKey(skillKey, request), request);
+        String resolvedSkillKey = resolveSkillKey(skillKey, request);
+        SkillBaselineResponse response = saveBaseline(resolvedSkillKey, request);
+        syncAffectedInstances(resolvedSkillKey);
+        return response;
     }
 
-    @Transactional
     public void deleteBaseline(String skillKey) {
-        if (repository.deleteBySkillKey(normalizeRequiredKey(skillKey)) == 0) {
+        String normalizedSkillKey = normalizeRequiredKey(skillKey);
+        List<java.util.UUID> affectedInstanceIds = instanceSkillBindingRepository.findInstanceIdsBySkillKey(normalizedSkillKey);
+        if (repository.deleteBySkillKey(normalizedSkillKey) == 0) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "skill baseline not found: " + skillKey);
         }
+        syncInstances(affectedInstanceIds);
     }
 
     private SkillBaselineResponse saveBaseline(String skillKey, SkillBaselineUpsertRequest request) {
@@ -80,6 +92,17 @@ public class SkillBaselineService {
                 .map(this::toResponse)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
                         "failed to load saved skill baseline: " + skillKey));
+    }
+
+    private void syncAffectedInstances(String skillKey) {
+        syncInstances(instanceSkillBindingRepository.findInstanceIdsBySkillKey(skillKey));
+    }
+
+    private void syncInstances(List<java.util.UUID> instanceIds) {
+        for (java.util.UUID instanceId : instanceIds) {
+            planeClient.syncInstanceSkills(instanceId);
+            instanceConfigMutationService.applyResolvedRuntimeConfigIfRunning(instanceId);
+        }
     }
 
     private SkillBaselineSummaryResponse toSummary(SkillBaselineRecord record) {

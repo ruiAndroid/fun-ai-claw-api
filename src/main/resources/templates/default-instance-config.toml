@@ -177,7 +177,7 @@ tool_dispatcher = "auto"
 [skills]
 prompt_injection_mode = "compact"
 open_skills_enabled = true
-open_skills_dir = "/workspace/agent-mgc-novel-script/skills"
+open_skills_dir = "/workspace/skills"
 
 [query_classification]
 enabled = true

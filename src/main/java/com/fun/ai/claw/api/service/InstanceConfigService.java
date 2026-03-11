@@ -28,15 +28,18 @@ public class InstanceConfigService {
     private final InstanceRuntimeConfigRepository instanceRuntimeConfigRepository;
     private final InstanceConfigProperties properties;
     private final ResourceLoader resourceLoader;
+    private final InstanceManagedSkillsConfigService instanceManagedSkillsConfigService;
 
     public InstanceConfigService(InstanceRepository instanceRepository,
                                  InstanceRuntimeConfigRepository instanceRuntimeConfigRepository,
                                  InstanceConfigProperties properties,
-                                 ResourceLoader resourceLoader) {
+                                 ResourceLoader resourceLoader,
+                                 InstanceManagedSkillsConfigService instanceManagedSkillsConfigService) {
         this.instanceRepository = instanceRepository;
         this.instanceRuntimeConfigRepository = instanceRuntimeConfigRepository;
         this.properties = properties;
         this.resourceLoader = resourceLoader;
+        this.instanceManagedSkillsConfigService = instanceManagedSkillsConfigService;
     }
 
     public InstanceConfigResponse get(UUID instanceId) {
@@ -50,7 +53,7 @@ public class InstanceConfigService {
         if (request == null || !StringUtils.hasText(request.configToml())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "configToml must not be blank");
         }
-        String normalizedConfig = normalizeConfigToml(request.configToml());
+        String normalizedConfig = normalizeManagedConfig(request.configToml());
         validateConfigSize(normalizedConfig, "instance config");
         String updatedBy = normalizeUpdatedBy(request.updatedBy());
         Instant updatedAt = Instant.now();
@@ -69,7 +72,7 @@ public class InstanceConfigService {
         Optional<InstanceRuntimeConfigRepository.Row> overrideRow = instanceRuntimeConfigRepository.findByInstanceId(instanceId);
         if (overrideRow.isPresent() && StringUtils.hasText(overrideRow.get().configToml())) {
             return new RuntimeConfig(
-                    normalizeConfigToml(overrideRow.get().configToml()),
+                    normalizeManagedConfig(overrideRow.get().configToml()),
                     "INSTANCE_OVERRIDE",
                     safePath(properties.getRuntimeConfigPath(), "/data/zeroclaw/config.toml"),
                     properties.isOverwriteOnStart()
@@ -95,10 +98,10 @@ public class InstanceConfigService {
         boolean overrideExists = overrideRow != null;
         if (overrideRow != null && StringUtils.hasText(overrideRow.configToml())) {
             source = "INSTANCE_OVERRIDE";
-            configToml = normalizeConfigToml(overrideRow.configToml());
+            configToml = normalizeManagedConfig(overrideRow.configToml());
         } else {
             source = "DEFAULT_TEMPLATE";
-            configToml = loadDefaultTemplate();
+            configToml = normalizeManagedConfig(loadDefaultTemplate());
         }
 
         return new InstanceConfigResponse(
@@ -162,6 +165,11 @@ public class InstanceConfigService {
             return "";
         }
         return normalized + "\n";
+    }
+
+    private String normalizeManagedConfig(String configToml) {
+        String normalized = normalizeConfigToml(configToml);
+        return instanceManagedSkillsConfigService.applyPolicy(normalized);
     }
 
     private String safePath(String value, String fallback) {
