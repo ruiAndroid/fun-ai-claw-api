@@ -1,4 +1,4 @@
-﻿package com.fun.ai.claw.api.repository;
+package com.fun.ai.claw.api.repository;
 
 import com.fun.ai.claw.api.model.AgentBaselineRecord;
 import org.springframework.jdbc.core.JdbcTemplate;
