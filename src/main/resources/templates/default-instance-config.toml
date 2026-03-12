@@ -164,13 +164,13 @@ max_concurrent = 4
 
 [agent]
 max_tool_iterations = 6
-compact_context = true
+compact_context = false
 max_history_messages = 25
 parallel_tools = false
 tool_dispatcher = "auto"
 
 [skills]
-prompt_injection_mode = "compact"
+prompt_injection_mode = "full"
 open_skills_enabled = true
 open_skills_dir = "/workspace/skills"
 
