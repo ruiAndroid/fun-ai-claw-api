@@ -6,6 +6,15 @@ server:
       min-spare: 20
   error:
     include-message: always
+
+logging:
+  file:
+    name: ${LOGGING_FILE_NAME:/data/fun-ai/logs/fun-ai-claw-api.log}
+  logback:
+    rollingpolicy:
+      max-history: 7
+      max-file-size: 100MB
+
 spring:
   application:
     name: fun-ai-claw-api
