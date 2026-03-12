@@ -28,7 +28,6 @@ import java.util.regex.Pattern;
 public class InstanceRoutingConfigService {
     private static final Pattern TABLE_HEADER_PATTERN = Pattern.compile("(?m)^\\s*(\\[\\[?.+?]]?)\\s*$");
     private static final Pattern PROPERTY_PATTERN = Pattern.compile("(?m)^\\s*([A-Za-z0-9_]+)\\s*=");
-    private static final Pattern EMBEDDING_ROUTES_PATTERN = Pattern.compile("(?m)^\\s*embedding_routes\\s*=.*$");
     private static final Pattern HEARTBEAT_HEADER_PATTERN = Pattern.compile("(?m)^\\s*\\[heartbeat]\\s*$");
     private static final int DEFAULT_RULE_PRIORITY = 100;
     private static final int DEFAULT_RULE_MIN_LENGTH = 1;
@@ -162,7 +161,7 @@ public class InstanceRoutingConfigService {
             builder.append("[[query_classification.rules]]\n");
             builder.append("hint = ").append(renderTomlString(rule.hint())).append('\n');
             builder.append("keywords = ").append(renderTomlStringArray(rule.keywords())).append('\n');
-            builder.append("literals = ").append(renderTomlStringArray(rule.literals())).append('\n');
+            builder.append("patterns = ").append(renderTomlStringArray(rule.patterns())).append('\n');
             builder.append("priority = ").append(rule.priority()).append('\n');
             builder.append("min_length = ").append(rule.minLength()).append('\n');
             builder.append("max_length = ").append(rule.maxLength()).append('\n');
@@ -219,10 +218,6 @@ public class InstanceRoutingConfigService {
     }
 
     private int findModelRoutesInsertionPoint(String configToml) {
-        Matcher embeddingRoutesMatcher = EMBEDDING_ROUTES_PATTERN.matcher(configToml);
-        if (embeddingRoutesMatcher.find()) {
-            return embeddingRoutesMatcher.start();
-        }
         List<HeaderRange> headers = findHeaders(configToml);
         if (!headers.isEmpty()) {
             return headers.get(0).start();
@@ -317,7 +312,7 @@ public class InstanceRoutingConfigService {
             QueryClassificationRuleConfigItem item = new QueryClassificationRuleConfigItem(
                     safeValue(parseTomlString(findProperty(properties, "hint"))),
                     parseTomlStringArray(findProperty(properties, "keywords")),
-                    parseTomlStringArray(findProperty(properties, "literals")),
+                    parseTomlStringArray(findFirstProperty(properties, "patterns", "literals")),
                     parseTomlInteger(findProperty(properties, "priority")),
                     parseTomlInteger(findProperty(properties, "min_length")),
                     parseTomlInteger(findProperty(properties, "max_length"))
@@ -325,6 +320,7 @@ public class InstanceRoutingConfigService {
             String extras = extractExtras(body, properties, Set.of(
                     "hint",
                     "keywords",
+                    "patterns",
                     "literals",
                     "priority",
                     "min_length",
@@ -485,6 +481,16 @@ public class InstanceRoutingConfigService {
         return null;
     }
 
+    private String findFirstProperty(List<PropertyValue> properties, String... names) {
+        for (String name : names) {
+            String value = findProperty(properties, name);
+            if (value != null) {
+                return value;
+            }
+        }
+        return null;
+    }
+
     private String extractExtras(String body, List<PropertyValue> properties, Set<String> handledProperties) {
         List<PropertyValue> matched = properties.stream()
                 .filter(property -> handledProperties.contains(property.name()))
@@ -561,7 +567,7 @@ public class InstanceRoutingConfigService {
             }
             String hint = requireText(rule.hint(), "queryClassificationRules[" + index + "].hint");
             List<String> keywords = normalizeStringList(rule.keywords());
-            List<String> literals = normalizeStringList(rule.literals());
+            List<String> patterns = normalizeStringList(rule.patterns());
             int priority = rule.priority() == null ? DEFAULT_RULE_PRIORITY : rule.priority();
             int minLength = rule.minLength() == null ? DEFAULT_RULE_MIN_LENGTH : rule.minLength();
             int maxLength = rule.maxLength() == null ? DEFAULT_RULE_MAX_LENGTH : rule.maxLength();
@@ -580,7 +586,7 @@ public class InstanceRoutingConfigService {
             normalized.add(new QueryClassificationRuleConfigItem(
                     hint,
                     keywords,
-                    literals,
+                    patterns,
                     priority,
                     minLength,
                     maxLength

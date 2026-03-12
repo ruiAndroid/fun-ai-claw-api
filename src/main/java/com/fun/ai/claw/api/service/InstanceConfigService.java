@@ -23,6 +23,8 @@ import java.util.UUID;
 @Service
 public class InstanceConfigService {
     private static final Logger log = LoggerFactory.getLogger(InstanceConfigService.class);
+    private static final String LEGACY_EMPTY_EMBEDDING_ROUTES = "(?m)^\\s*embedding_routes\\s*=\\s*\\[\\s*]\\s*\\n?";
+    private static final String LEGACY_QUERY_RULE_LITERALS = "(?m)^(\\s*)literals\\s*=";
 
     private final InstanceRepository instanceRepository;
     private final InstanceRuntimeConfigRepository instanceRuntimeConfigRepository;
@@ -190,6 +192,12 @@ public class InstanceConfigService {
 
     private String normalizeConfigToml(String configToml) {
         String normalized = configToml == null ? "" : configToml.replace("\r\n", "\n").trim();
+        if (!StringUtils.hasText(normalized)) {
+            return "";
+        }
+        normalized = normalized.replaceAll(LEGACY_EMPTY_EMBEDDING_ROUTES, "");
+        normalized = normalized.replaceAll(LEGACY_QUERY_RULE_LITERALS, "$1patterns =");
+        normalized = normalized.trim();
         if (!StringUtils.hasText(normalized)) {
             return "";
         }
