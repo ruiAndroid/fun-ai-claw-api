@@ -10,6 +10,7 @@ import com.fun.ai.claw.api.repository.InstanceSkillBindingRepository;
 import com.fun.ai.claw.api.repository.SkillBaselineRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -24,17 +25,20 @@ public class InstanceSkillBindingService {
     private final SkillBaselineRepository skillBaselineRepository;
     private final InstanceSkillBindingRepository instanceSkillBindingRepository;
     private final PlaneClient planeClient;
+    private final InstanceConfigService instanceConfigService;
     private final InstanceConfigMutationService instanceConfigMutationService;
 
     public InstanceSkillBindingService(InstanceRepository instanceRepository,
                                        SkillBaselineRepository skillBaselineRepository,
                                        InstanceSkillBindingRepository instanceSkillBindingRepository,
                                        PlaneClient planeClient,
+                                       InstanceConfigService instanceConfigService,
                                        InstanceConfigMutationService instanceConfigMutationService) {
         this.instanceRepository = instanceRepository;
         this.skillBaselineRepository = skillBaselineRepository;
         this.instanceSkillBindingRepository = instanceSkillBindingRepository;
         this.planeClient = planeClient;
+        this.instanceConfigService = instanceConfigService;
         this.instanceConfigMutationService = instanceConfigMutationService;
     }
 
@@ -46,6 +50,7 @@ public class InstanceSkillBindingService {
         return new ListResponse<>(items);
     }
 
+    @Transactional
     public InstanceSkillBindingResponse install(UUID instanceId,
                                                 String skillKey,
                                                 UpsertInstanceSkillBindingRequest request) {
@@ -69,6 +74,8 @@ public class InstanceSkillBindingService {
                 existing != null ? existing.createdAt() : now,
                 now
         ), now);
+        instanceConfigService.synchronizeManagedSkillsSource(instanceId,
+                trimToNull(request == null ? null : request.updatedBy()) == null ? "ui-dashboard" : trimToNull(request.updatedBy()));
         syncInstance(instanceId);
         return toResponse(instanceSkillBindingRepository.findByInstanceId(instanceId).stream()
                 .filter(item -> normalizedSkillKey.equals(item.skillKey()))
@@ -77,10 +84,16 @@ public class InstanceSkillBindingService {
                         "failed to load saved instance skill binding: " + normalizedSkillKey)));
     }
 
+    @Transactional
     public void uninstall(UUID instanceId, String skillKey) {
         requireInstance(instanceId);
         String normalizedSkillKey = normalizeRequiredSkillKey(skillKey);
-        instanceSkillBindingRepository.delete(instanceId, normalizedSkillKey);
+        int deleted = instanceSkillBindingRepository.delete(instanceId, normalizedSkillKey);
+        if (deleted <= 0) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                    "instance skill binding not found: " + normalizedSkillKey);
+        }
+        instanceConfigService.synchronizeManagedSkillsSource(instanceId, "instance-skill-uninstall");
         syncInstance(instanceId);
     }
 

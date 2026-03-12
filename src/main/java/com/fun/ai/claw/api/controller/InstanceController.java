@@ -6,6 +6,7 @@ import com.fun.ai.claw.api.model.CreateInstanceRequest;
 import com.fun.ai.claw.api.model.InstanceActionRequest;
 import com.fun.ai.claw.api.model.InstanceAgentBindingResponse;
 import com.fun.ai.claw.api.model.InstanceConfigResponse;
+import com.fun.ai.claw.api.model.InstanceDefaultModelConfigResponse;
 import com.fun.ai.claw.api.model.InstanceMainAgentGuidanceResponse;
 import com.fun.ai.claw.api.model.InstanceRoutingConfigResponse;
 import com.fun.ai.claw.api.model.InstanceSkillBindingResponse;
@@ -16,6 +17,7 @@ import com.fun.ai.claw.api.model.SkillDescriptorResponse;
 import com.fun.ai.claw.api.model.UpsertAgentSystemPromptRequest;
 import com.fun.ai.claw.api.model.UpsertInstanceAgentBindingRequest;
 import com.fun.ai.claw.api.model.UpsertInstanceConfigRequest;
+import com.fun.ai.claw.api.model.UpsertInstanceDefaultModelConfigRequest;
 import com.fun.ai.claw.api.model.UpsertInstanceMainAgentGuidanceRequest;
 import com.fun.ai.claw.api.model.UpsertInstanceRoutingConfigRequest;
 import com.fun.ai.claw.api.model.UpsertInstanceSkillBindingRequest;
@@ -25,6 +27,7 @@ import com.fun.ai.claw.api.service.InstanceAgentPromptMutationService;
 import com.fun.ai.claw.api.service.InstanceAgentService;
 import com.fun.ai.claw.api.service.InstanceConfigMutationService;
 import com.fun.ai.claw.api.service.InstanceConfigService;
+import com.fun.ai.claw.api.service.InstanceDefaultModelConfigService;
 import com.fun.ai.claw.api.service.InstanceMainAgentGuidanceService;
 import com.fun.ai.claw.api.service.InstanceRoutingConfigService;
 import com.fun.ai.claw.api.service.InstanceSkillBindingService;
@@ -56,6 +59,7 @@ public class InstanceController {
     private final InstanceMainAgentGuidanceService instanceMainAgentGuidanceService;
     private final InstanceConfigService instanceConfigService;
     private final InstanceConfigMutationService instanceConfigMutationService;
+    private final InstanceDefaultModelConfigService instanceDefaultModelConfigService;
     private final InstanceRoutingConfigService instanceRoutingConfigService;
     private final InstanceSkillBindingService instanceSkillBindingService;
     private final InstanceAgentBindingService instanceAgentBindingService;
@@ -68,6 +72,7 @@ public class InstanceController {
                               InstanceMainAgentGuidanceService instanceMainAgentGuidanceService,
                               InstanceConfigService instanceConfigService,
                               InstanceConfigMutationService instanceConfigMutationService,
+                              InstanceDefaultModelConfigService instanceDefaultModelConfigService,
                               InstanceRoutingConfigService instanceRoutingConfigService,
                               InstanceSkillBindingService instanceSkillBindingService,
                               InstanceAgentBindingService instanceAgentBindingService) {
@@ -79,6 +84,7 @@ public class InstanceController {
         this.instanceMainAgentGuidanceService = instanceMainAgentGuidanceService;
         this.instanceConfigService = instanceConfigService;
         this.instanceConfigMutationService = instanceConfigMutationService;
+        this.instanceDefaultModelConfigService = instanceDefaultModelConfigService;
         this.instanceRoutingConfigService = instanceRoutingConfigService;
         this.instanceSkillBindingService = instanceSkillBindingService;
         this.instanceAgentBindingService = instanceAgentBindingService;
@@ -182,6 +188,17 @@ public class InstanceController {
     @DeleteMapping("/{instanceId}/config")
     public InstanceConfigResponse deleteInstanceConfigOverride(@PathVariable UUID instanceId) {
         return instanceConfigMutationService.deleteOverride(instanceId);
+    }
+
+    @GetMapping("/{instanceId}/default-model-config")
+    public InstanceDefaultModelConfigResponse getInstanceDefaultModelConfig(@PathVariable UUID instanceId) {
+        return instanceDefaultModelConfigService.get(instanceId);
+    }
+
+    @PutMapping("/{instanceId}/default-model-config")
+    public InstanceDefaultModelConfigResponse upsertInstanceDefaultModelConfig(@PathVariable UUID instanceId,
+                                                                               @RequestBody UpsertInstanceDefaultModelConfigRequest request) {
+        return instanceDefaultModelConfigService.upsert(instanceId, request);
     }
 
     @GetMapping("/{instanceId}/routing-config")

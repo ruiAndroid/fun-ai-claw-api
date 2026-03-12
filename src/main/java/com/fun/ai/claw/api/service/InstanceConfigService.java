@@ -79,6 +79,15 @@ public class InstanceConfigService {
         instanceRuntimeConfigRepository.upsert(instanceId, rewrittenConfig, normalizeUpdatedBy(updatedBy), updatedAt);
     }
 
+    public void synchronizeManagedSkillsSource(UUID instanceId, String updatedBy) {
+        requireInstance(instanceId);
+        String sourceConfig = loadStoredOrDefaultSourceConfig(instanceId);
+        String rewrittenConfig = instanceManagedSkillsConfigService.applyPolicy(instanceId, sourceConfig);
+        validateConfigSize(rewrittenConfig, "instance config");
+        Instant updatedAt = Instant.now();
+        instanceRuntimeConfigRepository.upsert(instanceId, rewrittenConfig, normalizeUpdatedBy(updatedBy), updatedAt);
+    }
+
     public RuntimeConfig resolveRuntimeConfig(UUID instanceId) {
         requireInstance(instanceId);
         Optional<InstanceRuntimeConfigRepository.Row> overrideRow = instanceRuntimeConfigRepository.findByInstanceId(instanceId);
@@ -189,7 +198,7 @@ public class InstanceConfigService {
 
     private String normalizeManagedConfig(UUID instanceId, String configToml) {
         String normalized = normalizeConfigToml(configToml);
-        String withSkills = instanceManagedSkillsConfigService.applyPolicy(normalized);
+        String withSkills = instanceManagedSkillsConfigService.applyPolicy(instanceId, normalized);
         return instanceManagedAgentsConfigService.applyPolicy(instanceId, withSkills);
     }
 

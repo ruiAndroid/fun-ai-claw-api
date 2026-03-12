@@ -1,5 +1,5 @@
 # fun-ai-claw default instance config template
-# Please fill api_key / reliability.api_keys after instance creation.
+# Please fill api_key after instance creation.
 
 api_key = ""
 default_provider = "custom:https://api.ai.fun.tv/v1"
@@ -150,7 +150,6 @@ allowed_workspace_roots = []
 provider_retries = 0
 provider_backoff_ms = 500
 fallback_providers = []
-api_keys = []
 channel_initial_backoff_secs = 2
 channel_max_backoff_secs = 60
 scheduler_poll_secs = 15
