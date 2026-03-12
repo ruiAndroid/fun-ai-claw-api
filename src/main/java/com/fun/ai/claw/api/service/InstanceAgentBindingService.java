@@ -106,7 +106,11 @@ public class InstanceAgentBindingService {
         requireInstance(instanceId);
         ensureBootstrapped(instanceId);
         String normalizedAgentKey = normalizeRequiredAgentKey(agentKey);
-        instanceAgentBindingRepository.delete(instanceId, normalizedAgentKey);
+        int deleted = instanceAgentBindingRepository.delete(instanceId, normalizedAgentKey);
+        if (deleted <= 0) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                    "instance agent binding not found: " + normalizedAgentKey);
+        }
         instanceConfigService.synchronizeManagedAgentsSource(instanceId, "instance-agent-uninstall");
         syncInstance(instanceId);
     }
