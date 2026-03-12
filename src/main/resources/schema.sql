@@ -455,6 +455,69 @@ alter table agent_baseline
 create index if not exists idx_agent_baseline_updated_at on agent_baseline (updated_at desc);
 create index if not exists idx_agent_baseline_enabled on agent_baseline (enabled);
 
+create table if not exists instance_agent_binding (
+    instance_id uuid not null references claw_instance (id) on delete cascade,
+    agent_key varchar(128) not null,
+    provider varchar(255) null,
+    model varchar(255) null,
+    temperature double precision null,
+    agentic boolean null,
+    system_prompt text null,
+    allowed_tools_json text null,
+    extra_config_toml text null,
+    updated_by varchar(128) null,
+    created_at timestamptz not null,
+    updated_at timestamptz not null,
+    primary key (instance_id, agent_key)
+);
+
+alter table instance_agent_binding
+    add column if not exists provider varchar(255) null;
+
+alter table instance_agent_binding
+    add column if not exists model varchar(255) null;
+
+alter table instance_agent_binding
+    add column if not exists temperature double precision null;
+
+alter table instance_agent_binding
+    add column if not exists agentic boolean null;
+
+alter table instance_agent_binding
+    add column if not exists system_prompt text null;
+
+alter table instance_agent_binding
+    add column if not exists allowed_tools_json text null;
+
+alter table instance_agent_binding
+    add column if not exists extra_config_toml text null;
+
+alter table instance_agent_binding
+    add column if not exists updated_by varchar(128) null;
+
+alter table instance_agent_binding
+    add column if not exists created_at timestamptz;
+
+alter table instance_agent_binding
+    add column if not exists updated_at timestamptz;
+
+update instance_agent_binding
+set created_at = now()
+where created_at is null;
+
+alter table instance_agent_binding
+    alter column created_at set not null;
+
+update instance_agent_binding
+set updated_at = now()
+where updated_at is null;
+
+alter table instance_agent_binding
+    alter column updated_at set not null;
+
+create index if not exists idx_instance_agent_binding_agent_key on instance_agent_binding (agent_key);
+create index if not exists idx_instance_agent_binding_updated_at on instance_agent_binding (updated_at desc);
+
 create table if not exists skill_baseline (
     skill_key varchar(128) primary key,
     display_name varchar(128) not null,

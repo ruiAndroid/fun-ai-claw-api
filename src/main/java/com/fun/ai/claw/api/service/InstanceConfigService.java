@@ -29,17 +29,20 @@ public class InstanceConfigService {
     private final InstanceConfigProperties properties;
     private final ResourceLoader resourceLoader;
     private final InstanceManagedSkillsConfigService instanceManagedSkillsConfigService;
+    private final InstanceManagedAgentsConfigService instanceManagedAgentsConfigService;
 
     public InstanceConfigService(InstanceRepository instanceRepository,
                                  InstanceRuntimeConfigRepository instanceRuntimeConfigRepository,
                                  InstanceConfigProperties properties,
                                  ResourceLoader resourceLoader,
-                                 InstanceManagedSkillsConfigService instanceManagedSkillsConfigService) {
+                                 InstanceManagedSkillsConfigService instanceManagedSkillsConfigService,
+                                 InstanceManagedAgentsConfigService instanceManagedAgentsConfigService) {
         this.instanceRepository = instanceRepository;
         this.instanceRuntimeConfigRepository = instanceRuntimeConfigRepository;
         this.properties = properties;
         this.resourceLoader = resourceLoader;
         this.instanceManagedSkillsConfigService = instanceManagedSkillsConfigService;
+        this.instanceManagedAgentsConfigService = instanceManagedAgentsConfigService;
     }
 
     public InstanceConfigResponse get(UUID instanceId) {
@@ -53,7 +56,7 @@ public class InstanceConfigService {
         if (request == null || !StringUtils.hasText(request.configToml())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "configToml must not be blank");
         }
-        String normalizedConfig = normalizeManagedConfig(request.configToml());
+        String normalizedConfig = normalizeManagedConfig(instanceId, request.configToml());
         validateConfigSize(normalizedConfig, "instance config");
         String updatedBy = normalizeUpdatedBy(request.updatedBy());
         Instant updatedAt = Instant.now();
@@ -72,14 +75,14 @@ public class InstanceConfigService {
         Optional<InstanceRuntimeConfigRepository.Row> overrideRow = instanceRuntimeConfigRepository.findByInstanceId(instanceId);
         if (overrideRow.isPresent() && StringUtils.hasText(overrideRow.get().configToml())) {
             return new RuntimeConfig(
-                    normalizeManagedConfig(overrideRow.get().configToml()),
+                    normalizeManagedConfig(instanceId, overrideRow.get().configToml()),
                     "INSTANCE_OVERRIDE",
                     safePath(properties.getRuntimeConfigPath(), "/data/zeroclaw/config.toml"),
                     properties.isOverwriteOnStart()
             );
         }
         return new RuntimeConfig(
-                loadDefaultTemplate(),
+                normalizeManagedConfig(instanceId, loadDefaultTemplate()),
                 "DEFAULT_TEMPLATE",
                 safePath(properties.getRuntimeConfigPath(), "/data/zeroclaw/config.toml"),
                 properties.isOverwriteOnStart()
@@ -98,10 +101,10 @@ public class InstanceConfigService {
         boolean overrideExists = overrideRow != null;
         if (overrideRow != null && StringUtils.hasText(overrideRow.configToml())) {
             source = "INSTANCE_OVERRIDE";
-            configToml = normalizeManagedConfig(overrideRow.configToml());
+            configToml = normalizeManagedConfig(instanceId, overrideRow.configToml());
         } else {
             source = "DEFAULT_TEMPLATE";
-            configToml = normalizeManagedConfig(loadDefaultTemplate());
+            configToml = normalizeManagedConfig(instanceId, loadDefaultTemplate());
         }
 
         return new InstanceConfigResponse(
@@ -167,9 +170,10 @@ public class InstanceConfigService {
         return normalized + "\n";
     }
 
-    private String normalizeManagedConfig(String configToml) {
+    private String normalizeManagedConfig(UUID instanceId, String configToml) {
         String normalized = normalizeConfigToml(configToml);
-        return instanceManagedSkillsConfigService.applyPolicy(normalized);
+        String withSkills = instanceManagedSkillsConfigService.applyPolicy(normalized);
+        return instanceManagedAgentsConfigService.applyPolicy(instanceId, withSkills);
     }
 
     private String safePath(String value, String fallback) {
