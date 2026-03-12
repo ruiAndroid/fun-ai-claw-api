@@ -9,7 +9,9 @@ import com.fun.ai.claw.api.model.InstanceActionType;
 import com.fun.ai.claw.api.model.InstanceDesiredState;
 import com.fun.ai.claw.api.model.InstanceRuntime;
 import com.fun.ai.claw.api.model.InstanceStatus;
+import com.fun.ai.claw.api.repository.InstanceAgentGuidanceRepository;
 import com.fun.ai.claw.api.repository.InstanceRepository;
+import com.fun.ai.claw.api.repository.InstanceRuntimeConfigRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -32,6 +34,9 @@ public class ControlService {
     private static final Logger log = LoggerFactory.getLogger(ControlService.class);
 
     private final InstanceRepository instanceRepository;
+    private final InstanceAgentGuidanceRepository guidanceRepository;
+    private final InstanceRuntimeConfigRepository runtimeConfigRepository;
+    private final InstanceConfigService instanceConfigService;
     private final ImageCatalogProperties imageCatalogProperties;
     private final PlaneClient planeClient;
     private final int gatewayPortRangeStart;
@@ -40,6 +45,9 @@ public class ControlService {
     private final String remoteConnectCommandTemplate;
 
     public ControlService(InstanceRepository instanceRepository,
+                          InstanceAgentGuidanceRepository guidanceRepository,
+                          InstanceRuntimeConfigRepository runtimeConfigRepository,
+                          InstanceConfigService instanceConfigService,
                           ImageCatalogProperties imageCatalogProperties,
                           PlaneClient planeClient,
                           @Value("${app.gateway.port-range-start:42617}") int gatewayPortRangeStart,
@@ -47,6 +55,9 @@ public class ControlService {
                           @Value("${app.gateway.url-template:http://8.152.159.249/fun-claw/ui-controller/{instanceId}}") String gatewayUrlTemplate,
                           @Value("${app.remote-connect.command-template:}") String remoteConnectCommandTemplate) {
         this.instanceRepository = instanceRepository;
+        this.guidanceRepository = guidanceRepository;
+        this.runtimeConfigRepository = runtimeConfigRepository;
+        this.instanceConfigService = instanceConfigService;
         this.imageCatalogProperties = imageCatalogProperties;
         this.planeClient = planeClient;
         this.gatewayPortRangeStart = gatewayPortRangeStart;
@@ -116,6 +127,8 @@ public class ControlService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "gateway host port already allocated");
         }
 
+        initializeInstanceDefaults(instanceId, now);
+
         if (desiredState == InstanceDesiredState.RUNNING) {
             PlaneExecutionResult executionResult = executeActionWithGatewayPortRetry(
                     instance.id(),
@@ -152,6 +165,20 @@ public class ControlService {
         }
 
         return attachGatewayUrl(instance);
+    }
+
+    private void initializeInstanceDefaults(UUID instanceId, Instant now) {
+        try {
+            InstanceConfigService.RuntimeConfig defaultConfig = instanceConfigService.resolveRuntimeConfig(instanceId);
+            runtimeConfigRepository.upsert(instanceId, defaultConfig.content(), "system", now);
+        } catch (Exception ex) {
+            log.warn("failed to initialize default runtime config for instance {}: {}", instanceId, ex.getMessage());
+        }
+        try {
+            guidanceRepository.upsert(instanceId, "", true, "system", now);
+        } catch (Exception ex) {
+            log.warn("failed to initialize default agent guidance for instance {}: {}", instanceId, ex.getMessage());
+        }
     }
 
     @Transactional(noRollbackFor = ResponseStatusException.class)
