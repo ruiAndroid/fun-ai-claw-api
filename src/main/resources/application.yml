@@ -4,7 +4,8 @@ server:
     threads:
       max: 400
       min-spare: 20
-
+  error:
+    include-message: always
 spring:
   application:
     name: fun-ai-claw-api
