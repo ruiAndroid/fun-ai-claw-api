@@ -6,10 +6,6 @@ default_provider = "custom:https://api.ai.fun.tv/v1"
 default_model = "MiniMax-M2.5"
 default_temperature = 0.7
 
-[[model_routes]]
-hint = "mgc-novel-to-script"
-provider = "custom:https://api.ai.fun.tv/v1"
-model = "MiniMax-M2.5"
 
 embedding_routes = []
 
