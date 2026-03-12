@@ -11,6 +11,7 @@ import com.fun.ai.claw.api.repository.InstanceAgentBindingRepository;
 import com.fun.ai.claw.api.repository.InstanceRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -54,6 +55,7 @@ public class InstanceAgentBindingService {
         return new ListResponse<>(items);
     }
 
+    @Transactional
     public InstanceAgentBindingResponse upsert(UUID instanceId,
                                                String agentKey,
                                                UpsertInstanceAgentBindingRequest request) {
@@ -89,6 +91,7 @@ public class InstanceAgentBindingService {
                 now
         );
         instanceAgentBindingRepository.upsert(target, now);
+        instanceConfigService.synchronizeManagedAgentsSource(instanceId, target.updatedBy());
         syncInstance(instanceId);
         return instanceAgentBindingRepository.findByInstanceId(instanceId).stream()
                 .filter(item -> normalizedAgentKey.equals(item.agentKey()))
@@ -98,11 +101,13 @@ public class InstanceAgentBindingService {
                         "failed to load saved instance agent binding: " + normalizedAgentKey));
     }
 
+    @Transactional
     public void uninstall(UUID instanceId, String agentKey) {
         requireInstance(instanceId);
         ensureBootstrapped(instanceId);
         String normalizedAgentKey = normalizeRequiredAgentKey(agentKey);
         instanceAgentBindingRepository.delete(instanceId, normalizedAgentKey);
+        instanceConfigService.synchronizeManagedAgentsSource(instanceId, "instance-agent-uninstall");
         syncInstance(instanceId);
     }
 

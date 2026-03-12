@@ -70,6 +70,15 @@ public class InstanceConfigService {
         return buildResponse(instanceId, null);
     }
 
+    public void synchronizeManagedAgentsSource(UUID instanceId, String updatedBy) {
+        requireInstance(instanceId);
+        String sourceConfig = loadStoredOrDefaultSourceConfig(instanceId);
+        String rewrittenConfig = instanceManagedAgentsConfigService.materializeBindings(instanceId, sourceConfig);
+        validateConfigSize(rewrittenConfig, "instance config");
+        Instant updatedAt = Instant.now();
+        instanceRuntimeConfigRepository.upsert(instanceId, rewrittenConfig, normalizeUpdatedBy(updatedBy), updatedAt);
+    }
+
     public RuntimeConfig resolveRuntimeConfig(UUID instanceId) {
         requireInstance(instanceId);
         Optional<InstanceRuntimeConfigRepository.Row> overrideRow = instanceRuntimeConfigRepository.findByInstanceId(instanceId);
@@ -118,6 +127,14 @@ public class InstanceConfigService {
                 overrideRow == null ? null : overrideRow.updatedAt(),
                 overrideRow == null ? null : overrideRow.updatedBy()
         );
+    }
+
+    private String loadStoredOrDefaultSourceConfig(UUID instanceId) {
+        Optional<InstanceRuntimeConfigRepository.Row> overrideRow = instanceRuntimeConfigRepository.findByInstanceId(instanceId);
+        if (overrideRow.isPresent() && StringUtils.hasText(overrideRow.get().configToml())) {
+            return normalizeConfigToml(overrideRow.get().configToml());
+        }
+        return loadDefaultTemplate();
     }
 
     private String loadDefaultTemplate() {

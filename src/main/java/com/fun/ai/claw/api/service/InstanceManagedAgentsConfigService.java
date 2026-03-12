@@ -38,34 +38,54 @@ public class InstanceManagedAgentsConfigService {
     }
 
     public String applyPolicy(UUID instanceId, String configToml) {
-        String normalized = normalize(configToml);
         List<InstanceAgentBindingRecord> bindings = instanceAgentBindingRepository.findByInstanceId(instanceId).stream()
                 .sorted(Comparator.comparing(InstanceAgentBindingRecord::agentKey))
                 .toList();
-        if (bindings.isEmpty()) {
+        return rewriteAgentBlocks(configToml, bindings, false);
+    }
+
+    public String materializeBindings(UUID instanceId, String configToml) {
+        List<InstanceAgentBindingRecord> bindings = instanceAgentBindingRepository.findByInstanceId(instanceId).stream()
+                .sorted(Comparator.comparing(InstanceAgentBindingRecord::agentKey))
+                .toList();
+        return rewriteAgentBlocks(configToml, bindings, true);
+    }
+
+    private String rewriteAgentBlocks(String configToml,
+                                      List<InstanceAgentBindingRecord> bindings,
+                                      boolean stripBlocksWhenBindingsEmpty) {
+        String normalized = normalize(configToml);
+        if (bindings.isEmpty() && !stripBlocksWhenBindingsEmpty) {
             return normalized;
         }
-
         List<AgentBlockRange> ranges = findAgentBlockRanges(normalized);
+        if (ranges.isEmpty() && bindings.isEmpty()) {
+            return normalized;
+        }
         int insertionPoint = !ranges.isEmpty()
                 ? ranges.get(0).start()
                 : findInsertionPoint(normalized);
         String stripped = removeRanges(normalized, ranges);
-        String renderedBlocks = renderBindings(bindings);
-
         String before = stripped.substring(0, insertionPoint).stripTrailing();
         String after = stripped.substring(insertionPoint).stripLeading();
         StringBuilder builder = new StringBuilder();
         if (StringUtils.hasText(before)) {
-            builder.append(before).append('\n').append('\n');
+            builder.append(before);
         }
-        builder.append(renderedBlocks);
+        if (!bindings.isEmpty()) {
+            if (builder.length() > 0) {
+                builder.append('\n').append('\n');
+            }
+            builder.append(renderBindings(bindings).stripTrailing());
+        }
         if (StringUtils.hasText(after)) {
-            builder.append('\n').append(after);
+            if (builder.length() > 0) {
+                builder.append('\n').append('\n');
+            }
+            builder.append(after);
         }
         return ensureTrailingNewline(builder.toString().replace("\r\n", "\n"));
     }
-
     public List<InstanceAgentBindingRecord> parseBindings(UUID instanceId, String configToml) {
         String normalized = normalize(configToml);
         Matcher matcher = AGENT_BLOCK_PATTERN.matcher(normalized);
