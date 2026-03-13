@@ -9,6 +9,7 @@ import com.fun.ai.claw.api.repository.InstanceSkillBindingRepository;
 import com.fun.ai.claw.api.repository.SkillBaselineRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -53,21 +54,64 @@ public class SkillBaselineService {
         if (repository.existsBySkillKey(skillKey)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "skill baseline already exists: " + skillKey);
         }
+        validateDisplayNameUniqueness(resolveDisplayName(skillKey, request.displayName()), null);
         return saveBaseline(skillKey, request);
     }
 
     public SkillBaselineResponse upsertBaseline(String skillKey, SkillBaselineUpsertRequest request) {
         String resolvedSkillKey = resolveSkillKey(skillKey, request);
+        validateDisplayNameUniqueness(resolveDisplayName(resolvedSkillKey, request.displayName()), resolvedSkillKey);
         SkillBaselineResponse response = saveBaseline(resolvedSkillKey, request);
         syncAffectedInstances(resolvedSkillKey);
         return response;
     }
 
+    @Transactional
+    public SkillBaselineResponse uploadAndCreateBaseline(String skillKey,
+                                                         String displayName,
+                                                         String description,
+                                                         Boolean enabled,
+                                                         String updatedBy,
+                                                         byte[] zipBytes) {
+        if (zipBytes == null || zipBytes.length == 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "zip file is required");
+        }
+        String normalizedSkillKey = normalizeRequiredKey(skillKey);
+        if (repository.existsBySkillKey(normalizedSkillKey)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "skill baseline already exists: " + normalizedSkillKey);
+        }
+        String resolvedDisplayName = resolveDisplayName(normalizedSkillKey, displayName);
+        validateDisplayNameUniqueness(resolvedDisplayName, null);
+
+        planeClient.uploadSkillPackage(normalizedSkillKey, zipBytes, false);
+        try {
+            SkillBaselineResponse response = saveBaseline(normalizedSkillKey, new SkillBaselineUpsertRequest(
+                    normalizedSkillKey,
+                    resolvedDisplayName,
+                    description,
+                    SERVER_PACKAGE_SOURCE_TYPE,
+                    normalizedSkillKey,
+                    enabled,
+                    updatedBy
+            ));
+            return response;
+        } catch (RuntimeException ex) {
+            planeClient.deleteSkillPackage(normalizedSkillKey);
+            throw ex;
+        }
+    }
+
     public void deleteBaseline(String skillKey) {
         String normalizedSkillKey = normalizeRequiredKey(skillKey);
+        SkillBaselineRecord existing = repository.findBySkillKey(normalizedSkillKey)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "skill baseline not found: " + skillKey));
         List<java.util.UUID> affectedInstanceIds = instanceSkillBindingRepository.findInstanceIdsBySkillKey(normalizedSkillKey);
         if (repository.deleteBySkillKey(normalizedSkillKey) == 0) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "skill baseline not found: " + skillKey);
+        }
+        if (SERVER_PACKAGE_SOURCE_TYPE.equalsIgnoreCase(existing.sourceType())
+                && normalizedSkillKey.equals(trimToNull(existing.sourceRef()))) {
+            planeClient.deleteSkillPackage(normalizedSkillKey);
         }
         syncInstances(affectedInstanceIds);
     }
@@ -185,6 +229,22 @@ public class SkillBaselineService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "sourceRef is required");
         }
         return normalized;
+    }
+
+    private String resolveDisplayName(String skillKey, String displayName) {
+        return firstNonBlank(displayName, skillKey);
+    }
+
+    private void validateDisplayNameUniqueness(String displayName, String currentSkillKey) {
+        if (!StringUtils.hasText(displayName)) {
+            return;
+        }
+        boolean duplicated = currentSkillKey == null
+                ? repository.existsByDisplayNameIgnoreCase(displayName)
+                : repository.existsByDisplayNameIgnoreCaseExcludingSkillKey(displayName, currentSkillKey);
+        if (duplicated) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "skill displayName already exists: " + displayName);
+        }
     }
 
     private String trimToNull(String value) {

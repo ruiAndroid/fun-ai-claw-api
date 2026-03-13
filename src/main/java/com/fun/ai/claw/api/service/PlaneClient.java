@@ -294,6 +294,48 @@ public class PlaneClient {
         }
     }
 
+    public void uploadSkillPackage(String skillKey, byte[] zipBytes, boolean overwrite) {
+        try {
+            restClient.put()
+                    .uri(UriComponentsBuilder.fromUriString(planeBaseUrl)
+                            .path("/skill-packages/{skillKey}")
+                            .queryParam("overwrite", overwrite)
+                            .buildAndExpand(skillKey)
+                            .toUriString())
+                    .body(zipBytes == null ? new byte[0] : zipBytes)
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (RestClientResponseException ex) {
+            throw mapPlaneQueryFailure("plane skill package upload failed", ex);
+        } catch (ResourceAccessException ex) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_GATEWAY,
+                    "plane service unavailable: " + planeBaseUrl + "/skill-packages/" + skillKey
+                            + (StringUtils.hasText(ex.getMessage()) ? " (" + ex.getMessage() + ")" : "")
+            );
+        }
+    }
+
+    public void deleteSkillPackage(String skillKey) {
+        try {
+            restClient.delete()
+                    .uri(planeBaseUrl + "/skill-packages/{skillKey}", skillKey)
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (RestClientResponseException ex) {
+            if (ex.getStatusCode().value() == 404) {
+                return;
+            }
+            throw mapPlaneQueryFailure("plane skill package delete failed", ex);
+        } catch (ResourceAccessException ex) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_GATEWAY,
+                    "plane service unavailable: " + planeBaseUrl + "/skill-packages/" + skillKey
+                            + (StringUtils.hasText(ex.getMessage()) ? " (" + ex.getMessage() + ")" : "")
+            );
+        }
+    }
+
     private String buildRuntimeFileUri(UUID instanceId, String path, Boolean overwrite) {
         UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(planeBaseUrl)
                 .path("/instances/{instanceId}/files")

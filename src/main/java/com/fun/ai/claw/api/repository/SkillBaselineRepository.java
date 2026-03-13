@@ -81,6 +81,32 @@ public class SkillBaselineRepository {
         return result != null && result > 0;
     }
 
+    public boolean existsByDisplayNameIgnoreCase(String displayName) {
+        Integer result = jdbcTemplate.queryForObject("""
+                        select count(1)
+                        from skill_baseline
+                        where lower(display_name) = lower(?)
+                        """,
+                Integer.class,
+                displayName
+        );
+        return result != null && result > 0;
+    }
+
+    public boolean existsByDisplayNameIgnoreCaseExcludingSkillKey(String displayName, String skillKey) {
+        Integer result = jdbcTemplate.queryForObject("""
+                        select count(1)
+                        from skill_baseline
+                        where lower(display_name) = lower(?)
+                          and skill_key <> ?
+                        """,
+                Integer.class,
+                displayName,
+                skillKey
+        );
+        return result != null && result > 0;
+    }
+
     public void upsert(SkillBaselineRecord record, Instant now) {
         jdbcTemplate.update("""
                         insert into skill_baseline (
