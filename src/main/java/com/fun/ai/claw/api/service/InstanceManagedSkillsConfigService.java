@@ -12,7 +12,7 @@ import java.util.regex.Pattern;
 
 @Service
 public class InstanceManagedSkillsConfigService {
-    private static final String MANAGED_SKILLS_DIR = "/workspace/skills";
+    private static final String MANAGED_OPEN_SKILLS_DIR = "/workspace/open-skills";
     private static final Pattern SKILLS_SECTION_PATTERN = Pattern.compile(
             "(?ms)^\\s*\\[\\s*skills\\s*]\\s*(.*?)(?=^\\s*\\[[^\\]]+\\]|\\z)"
     );
@@ -48,7 +48,7 @@ public class InstanceManagedSkillsConfigService {
         updatedBody = replaceOrAppendProperty(
                 updatedBody,
                 OPEN_SKILLS_DIR_PATTERN,
-                "open_skills_dir = \"" + MANAGED_SKILLS_DIR + "\""
+                "open_skills_dir = \"" + MANAGED_OPEN_SKILLS_DIR + "\""
         );
         updatedBody = replaceOrAppendProperty(
                 updatedBody,
@@ -61,7 +61,7 @@ public class InstanceManagedSkillsConfigService {
     }
 
     public String managedSkillsDir() {
-        return MANAGED_SKILLS_DIR;
+        return MANAGED_OPEN_SKILLS_DIR;
     }
 
     private String appendSkillsSection(String configToml, String managedBindingsComment) {
@@ -74,7 +74,7 @@ public class InstanceManagedSkillsConfigService {
         }
         builder.append("[skills]\n");
         builder.append("open_skills_enabled = true\n");
-        builder.append("open_skills_dir = \"").append(MANAGED_SKILLS_DIR).append("\"\n");
+        builder.append("open_skills_dir = \"").append(MANAGED_OPEN_SKILLS_DIR).append("\"\n");
         builder.append(managedBindingsComment).append('\n');
         return ensureTrailingNewline(builder.toString());
     }

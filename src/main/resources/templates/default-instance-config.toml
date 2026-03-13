@@ -169,7 +169,7 @@ tool_dispatcher = "auto"
 [skills]
 prompt_injection_mode = "full"
 open_skills_enabled = true
-open_skills_dir = "/workspace/skills"
+open_skills_dir = "/workspace/open-skills"
 
 [query_classification]
 enabled = false

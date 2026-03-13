@@ -25,7 +25,7 @@ insert into agent_baseline (
     'zeroclaw',
     'LOCAL_REPO',
     'agent-mgc-novel-script/agent.minifest.json | agent-mgc-novel-script/prompts/mgc-novel-to-script-system_prompt.md',
-    true,
+    false,
     'custom:https://api.ai.fun.tv/v1',
     'MiniMax-M2.5',
     0.3,
