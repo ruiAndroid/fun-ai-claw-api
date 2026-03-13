@@ -75,12 +75,27 @@ public class InstanceAgentBindingService {
         }
 
         AgentBaselineRecord baseline = baselineOptional.orElse(null);
+        InstanceManagedAgentsConfigService.ManagedAgentDefaults defaults = instanceManagedAgentsConfigService.extractDefaults(
+                instanceConfigService.get(instanceId).configToml()
+        );
+        String resolvedProvider = resolveString(
+                request == null ? null : request.provider(),
+                existing != null ? existing.provider() : null,
+                baseline != null ? baseline.provider() : null,
+                defaults.defaultProvider()
+        );
+        String resolvedModel = resolveString(
+                request == null ? null : request.model(),
+                existing != null ? existing.model() : null,
+                baseline != null ? baseline.model() : null,
+                defaults.defaultModel()
+        );
         Instant now = Instant.now();
         InstanceAgentBindingRecord target = new InstanceAgentBindingRecord(
                 instanceId,
                 normalizedAgentKey,
-                resolveString(request == null ? null : request.provider(), existing != null ? existing.provider() : null, baseline != null ? baseline.provider() : null),
-                resolveString(request == null ? null : request.model(), existing != null ? existing.model() : null, baseline != null ? baseline.model() : null),
+                resolvedProvider,
+                resolvedModel,
                 resolveDouble(request == null ? null : request.temperature(), existing != null ? existing.temperature() : null, baseline != null ? baseline.temperature() : null),
                 resolveBoolean(request == null ? null : request.agentic(), existing != null ? existing.agentic() : null, baseline != null ? baseline.agentic() : null),
                 resolveNullablePrompt(request == null ? null : request.systemPrompt(), existing != null ? existing.systemPrompt() : null, baseline != null ? baseline.systemPrompt() : null),
@@ -186,6 +201,10 @@ public class InstanceAgentBindingService {
     }
 
     private String resolveString(String requestValue, String existingValue, String baselineValue) {
+        return resolveString(requestValue, existingValue, baselineValue, null);
+    }
+
+    private String resolveString(String requestValue, String existingValue, String baselineValue, String defaultValue) {
         String requestNormalized = trimToNull(requestValue);
         if (requestValue != null) {
             return requestNormalized;
@@ -193,7 +212,11 @@ public class InstanceAgentBindingService {
         if (existingValue != null) {
             return existingValue;
         }
-        return trimToNull(baselineValue);
+        String baselineNormalized = trimToNull(baselineValue);
+        if (baselineNormalized != null) {
+            return baselineNormalized;
+        }
+        return trimToNull(defaultValue);
     }
 
     private Double resolveDouble(Double requestValue, Double existingValue, Double baselineValue) {

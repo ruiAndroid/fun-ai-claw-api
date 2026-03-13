@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -22,6 +23,10 @@ public class InstanceManagedAgentsConfigService {
     private static final Pattern HOOKS_SECTION_PATTERN = Pattern.compile("(?m)^\\s*\\[\\s*hooks\\s*]\\s*$");
     private static final Pattern PROVIDER_PATTERN = Pattern.compile("(?m)^\\s*provider\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
     private static final Pattern MODEL_PATTERN = Pattern.compile("(?m)^\\s*model\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
+    private static final Pattern DEFAULT_PROVIDER_BASIC_PATTERN = Pattern.compile("(?m)^\\s*default_provider\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
+    private static final Pattern DEFAULT_PROVIDER_LITERAL_PATTERN = Pattern.compile("(?m)^\\s*default_provider\\s*=\\s*'([^'\\r\\n]*)'\\s*$");
+    private static final Pattern DEFAULT_MODEL_BASIC_PATTERN = Pattern.compile("(?m)^\\s*default_model\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
+    private static final Pattern DEFAULT_MODEL_LITERAL_PATTERN = Pattern.compile("(?m)^\\s*default_model\\s*=\\s*'([^'\\r\\n]*)'\\s*$");
     private static final Pattern TEMPERATURE_PATTERN = Pattern.compile("(?m)^\\s*temperature\\s*=\\s*([-+]?[0-9]+(?:\\.[0-9]+)?)\\s*$");
     private static final Pattern SYSTEM_PROMPT_PATTERN = Pattern.compile("(?m)^\\s*system_prompt\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
     private static final Pattern SYSTEM_PROMPT_LITERAL_PATTERN = Pattern.compile("(?m)^\\s*system_prompt\\s*=\\s*'([^'\\r\\n]*)'\\s*$");
@@ -51,15 +56,23 @@ public class InstanceManagedAgentsConfigService {
         return rewriteAgentBlocks(configToml, bindings, true);
     }
 
+    public ManagedAgentDefaults extractDefaults(String configToml) {
+        return extractDefaultsFromNormalized(normalize(configToml));
+    }
+
     private String rewriteAgentBlocks(String configToml,
                                       List<InstanceAgentBindingRecord> bindings,
                                       boolean stripBlocksWhenBindingsEmpty) {
         String normalized = normalize(configToml);
+        ManagedAgentDefaults defaults = extractDefaultsFromNormalized(normalized);
+        List<InstanceAgentBindingRecord> effectiveBindings = bindings.stream()
+                .map(binding -> applyDefaults(binding, defaults))
+                .toList();
         if (bindings.isEmpty() && !stripBlocksWhenBindingsEmpty) {
             return normalized;
         }
         List<AgentBlockRange> ranges = findAgentBlockRanges(normalized);
-        if (ranges.isEmpty() && bindings.isEmpty()) {
+        if (ranges.isEmpty() && effectiveBindings.isEmpty()) {
             return normalized;
         }
         int insertionPoint = !ranges.isEmpty()
@@ -72,11 +85,11 @@ public class InstanceManagedAgentsConfigService {
         if (StringUtils.hasText(before)) {
             builder.append(before);
         }
-        if (!bindings.isEmpty()) {
+        if (!effectiveBindings.isEmpty()) {
             if (builder.length() > 0) {
                 builder.append('\n').append('\n');
             }
-            builder.append(renderBindings(bindings).stripTrailing());
+            builder.append(renderBindings(effectiveBindings).stripTrailing());
         }
         if (StringUtils.hasText(after)) {
             if (builder.length() > 0) {
@@ -88,6 +101,7 @@ public class InstanceManagedAgentsConfigService {
     }
     public List<InstanceAgentBindingRecord> parseBindings(UUID instanceId, String configToml) {
         String normalized = normalize(configToml);
+        ManagedAgentDefaults defaults = extractDefaultsFromNormalized(normalized);
         Matcher matcher = AGENT_BLOCK_PATTERN.matcher(normalized);
         List<InstanceAgentBindingRecord> records = new ArrayList<>();
         while (matcher.find()) {
@@ -99,8 +113,8 @@ public class InstanceManagedAgentsConfigService {
             records.add(new InstanceAgentBindingRecord(
                     instanceId,
                     agentKey,
-                    findStringValue(PROVIDER_PATTERN, block),
-                    findStringValue(MODEL_PATTERN, block),
+                    firstNonBlankOrNull(findStringValue(PROVIDER_PATTERN, block), defaults.defaultProvider()),
+                    firstNonBlankOrNull(findStringValue(MODEL_PATTERN, block), defaults.defaultModel()),
                     findDoubleValue(TEMPERATURE_PATTERN, block),
                     findBooleanValue(AGENTIC_PATTERN, block),
                     findSystemPromptValue(block),
@@ -225,6 +239,35 @@ public class InstanceManagedAgentsConfigService {
         return trimmed.isEmpty() ? null : trimmed + "\n";
     }
 
+    private ManagedAgentDefaults extractDefaultsFromNormalized(String normalizedConfigToml) {
+        return new ManagedAgentDefaults(
+                findStringValue(normalizedConfigToml, DEFAULT_PROVIDER_BASIC_PATTERN, DEFAULT_PROVIDER_LITERAL_PATTERN),
+                findStringValue(normalizedConfigToml, DEFAULT_MODEL_BASIC_PATTERN, DEFAULT_MODEL_LITERAL_PATTERN)
+        );
+    }
+
+    private InstanceAgentBindingRecord applyDefaults(InstanceAgentBindingRecord record, ManagedAgentDefaults defaults) {
+        String provider = firstNonBlankOrNull(record.provider(), defaults.defaultProvider());
+        String model = firstNonBlankOrNull(record.model(), defaults.defaultModel());
+        if (Objects.equals(provider, record.provider()) && Objects.equals(model, record.model())) {
+            return record;
+        }
+        return new InstanceAgentBindingRecord(
+                record.instanceId(),
+                record.agentKey(),
+                provider,
+                model,
+                record.temperature(),
+                record.agentic(),
+                record.systemPrompt(),
+                record.allowedTools(),
+                record.extraConfigToml(),
+                record.updatedBy(),
+                record.createdAt(),
+                record.updatedAt()
+        );
+    }
+
     private List<AgentBlockRange> findAgentBlockRanges(String configToml) {
         Matcher matcher = AGENT_BLOCK_PATTERN.matcher(configToml);
         List<AgentBlockRange> ranges = new ArrayList<>();
@@ -262,6 +305,18 @@ public class InstanceManagedAgentsConfigService {
             return null;
         }
         return unescapeTomlString(matcher.group(1)).trim();
+    }
+
+    private String findStringValue(String content, Pattern basicPattern, Pattern literalPattern) {
+        Matcher basicMatcher = basicPattern.matcher(content);
+        if (basicMatcher.find()) {
+            return trimToNull(unescapeTomlString(basicMatcher.group(1)));
+        }
+        Matcher literalMatcher = literalPattern.matcher(content);
+        if (literalMatcher.find()) {
+            return trimToNull(literalMatcher.group(1));
+        }
+        return null;
     }
 
     private Double findDoubleValue(Pattern pattern, String block) {
@@ -374,6 +429,26 @@ public class InstanceManagedAgentsConfigService {
         return "";
     }
 
+    private String firstNonBlankOrNull(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            String normalized = trimToNull(value);
+            if (normalized != null) {
+                return normalized;
+            }
+        }
+        return null;
+    }
+
+    private String trimToNull(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        return value.trim();
+    }
+
     private String escapeTomlString(String value) {
         StringBuilder builder = new StringBuilder(value.length());
         for (int index = 0; index < value.length(); index++) {
@@ -415,5 +490,11 @@ public class InstanceManagedAgentsConfigService {
     }
 
     private record AgentBlockRange(int start, int end) {
+    }
+
+    public record ManagedAgentDefaults(
+            String defaultProvider,
+            String defaultModel
+    ) {
     }
 }
