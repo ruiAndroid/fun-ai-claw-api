@@ -1301,4 +1301,8 @@ on conflict (skill_key) do update set
     updated_by = excluded.updated_by,
     updated_at = excluded.updated_at;
 
+delete from skill_baseline
+where upper(coalesce(source_type, '')) <> 'SERVER_PACKAGE'
+   or coalesce(btrim(source_ref), '') = '';
+
 commit;

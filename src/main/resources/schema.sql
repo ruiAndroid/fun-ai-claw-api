@@ -600,6 +600,10 @@ where updated_at is null;
 alter table skill_baseline
     alter column updated_at set not null;
 
+delete from skill_baseline
+where upper(coalesce(source_type, '')) <> 'SERVER_PACKAGE'
+   or coalesce(btrim(source_ref), '') = '';
+
 create index if not exists idx_skill_baseline_updated_at on skill_baseline (updated_at desc);
 create index if not exists idx_skill_baseline_enabled on skill_baseline (enabled);
 
