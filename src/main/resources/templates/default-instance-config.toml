@@ -169,7 +169,7 @@ tool_dispatcher = "auto"
 [skills]
 prompt_injection_mode = "full"
 open_skills_enabled = true
-open_skills_dir = "/workspace/open-skills"
+open_skills_dir = "/zeroclaw-data/workspace/open-skills"
 
 [query_classification]
 enabled = false

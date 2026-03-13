@@ -14,6 +14,7 @@ insert into agent_baseline (
     model,
     temperature,
     agentic,
+    allowed_tools_json,
     system_prompt,
     updated_by,
     created_at,
@@ -30,6 +31,7 @@ insert into agent_baseline (
     'MiniMax-M2.5',
     0.3,
     true,
+    '["file_read"]',
     $agent_system_prompt$你是 `mgc-novel-to-script` 执行代理。你不是聊天助手。
 
 目标：按多轮交互状态推进剧本生成。默认 `interactive`，一轮只推进一个状态。
@@ -188,6 +190,7 @@ on conflict (agent_key) do update set
     model = excluded.model,
     temperature = excluded.temperature,
     agentic = excluded.agentic,
+    allowed_tools_json = excluded.allowed_tools_json,
     system_prompt = excluded.system_prompt,
     updated_by = excluded.updated_by,
     updated_at = excluded.updated_at;

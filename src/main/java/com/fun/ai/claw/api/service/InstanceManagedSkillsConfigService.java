@@ -12,7 +12,7 @@ import java.util.regex.Pattern;
 
 @Service
 public class InstanceManagedSkillsConfigService {
-    private static final String MANAGED_OPEN_SKILLS_DIR = "/workspace/open-skills";
+    private static final String MANAGED_OPEN_SKILLS_DIR = "/zeroclaw-data/workspace/open-skills";
     private static final Pattern SKILLS_SECTION_PATTERN = Pattern.compile(
             "(?ms)^\\s*\\[\\s*skills\\s*]\\s*(.*?)(?=^\\s*\\[[^\\]]+\\]|\\z)"
     );

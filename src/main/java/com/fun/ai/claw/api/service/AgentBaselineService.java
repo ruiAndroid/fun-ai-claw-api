@@ -74,6 +74,7 @@ public class AgentBaselineService {
                 trimToNull(request.model()),
                 request.temperature(),
                 request.agentic(),
+                normalizeTools(request.allowedTools(), existing != null ? existing.allowedTools() : null),
                 trimToNull(request.systemPrompt()),
                 trimToNull(request.updatedBy()),
                 existing != null ? existing.createdAt() : now,
@@ -99,6 +100,7 @@ public class AgentBaselineService {
                 record.model(),
                 record.temperature(),
                 record.agentic(),
+                record.allowedTools(),
                 record.updatedBy(),
                 record.createdAt(),
                 record.updatedAt()
@@ -118,6 +120,7 @@ public class AgentBaselineService {
                 record.model(),
                 record.temperature(),
                 record.agentic(),
+                record.allowedTools(),
                 record.systemPrompt(),
                 record.updatedBy(),
                 record.createdAt(),
@@ -149,6 +152,17 @@ public class AgentBaselineService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "agentKey is required");
         }
         return normalized;
+    }
+
+    private List<String> normalizeTools(List<String> requestTools, List<String> existingTools) {
+        if (requestTools == null) {
+            return existingTools == null ? List.of() : existingTools;
+        }
+        return requestTools.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .distinct()
+                .toList();
     }
 
     private String normalizeKey(String value) {

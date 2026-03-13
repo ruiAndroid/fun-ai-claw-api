@@ -99,7 +99,11 @@ public class InstanceAgentBindingService {
                 resolveDouble(request == null ? null : request.temperature(), existing != null ? existing.temperature() : null, baseline != null ? baseline.temperature() : null),
                 resolveBoolean(request == null ? null : request.agentic(), existing != null ? existing.agentic() : null, baseline != null ? baseline.agentic() : null),
                 resolveNullablePrompt(request == null ? null : request.systemPrompt(), existing != null ? existing.systemPrompt() : null, baseline != null ? baseline.systemPrompt() : null),
-                normalizeTools(request == null ? null : request.allowedTools(), existing != null ? existing.allowedTools() : List.of()),
+                normalizeTools(
+                        request == null ? null : request.allowedTools(),
+                        existing != null ? existing.allowedTools() : null,
+                        baseline != null ? baseline.allowedTools() : null
+                ),
                 existing != null ? existing.extraConfigToml() : null,
                 trimToNull(request == null ? null : request.updatedBy()),
                 existing != null ? existing.createdAt() : now,
@@ -249,9 +253,12 @@ public class InstanceAgentBindingService {
         return baselineValue == null ? null : baselineValue.replace("\r\n", "\n");
     }
 
-    private List<String> normalizeTools(List<String> requestTools, List<String> existingTools) {
+    private List<String> normalizeTools(List<String> requestTools, List<String> existingTools, List<String> baselineTools) {
         if (requestTools == null) {
-            return existingTools == null ? List.of() : existingTools;
+            if (existingTools != null) {
+                return existingTools;
+            }
+            return baselineTools == null ? List.of() : baselineTools;
         }
         return requestTools.stream()
                 .filter(StringUtils::hasText)

@@ -1,6 +1,7 @@
 package com.fun.ai.claw.api.model;
 
 import java.time.Instant;
+import java.util.List;
 
 public record AgentBaselineResponse(
         String agentKey,
@@ -14,6 +15,7 @@ public record AgentBaselineResponse(
         String model,
         Double temperature,
         Boolean agentic,
+        List<String> allowedTools,
         String systemPrompt,
         String updatedBy,
         Instant createdAt,
