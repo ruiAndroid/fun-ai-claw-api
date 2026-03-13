@@ -525,7 +525,7 @@ create table if not exists skill_baseline (
     source_type varchar(32) not null,
     source_ref text null,
     enabled boolean not null default true,
-    skill_md text not null,
+    skill_md text not null default '',
     updated_by varchar(128) null,
     created_at timestamptz not null,
     updated_at timestamptz not null
@@ -547,7 +547,7 @@ alter table skill_baseline
     add column if not exists enabled boolean not null default true;
 
 alter table skill_baseline
-    add column if not exists skill_md text;
+    add column if not exists skill_md text not null default '';
 
 alter table skill_baseline
     add column if not exists updated_by varchar(128) null;
@@ -566,7 +566,7 @@ alter table skill_baseline
     alter column display_name set not null;
 
 update skill_baseline
-set source_type = 'MANUAL'
+set source_type = 'SERVER_PACKAGE'
 where source_type is null;
 
 alter table skill_baseline

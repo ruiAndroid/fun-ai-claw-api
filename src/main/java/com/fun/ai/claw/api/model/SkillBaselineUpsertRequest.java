@@ -7,7 +7,6 @@ public record SkillBaselineUpsertRequest(
         String sourceType,
         String sourceRef,
         Boolean enabled,
-        String skillMd,
         String updatedBy
 ) {
 }

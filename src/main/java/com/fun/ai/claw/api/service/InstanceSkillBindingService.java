@@ -20,6 +20,7 @@ import java.util.UUID;
 
 @Service
 public class InstanceSkillBindingService {
+    private static final String SERVER_PACKAGE_SOURCE_TYPE = "SERVER_PACKAGE";
 
     private final InstanceRepository instanceRepository;
     private final SkillBaselineRepository skillBaselineRepository;
@@ -60,6 +61,10 @@ public class InstanceSkillBindingService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "skill baseline not found: " + skillKey));
         if (!baseline.enabled()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "skill baseline is disabled: " + normalizedSkillKey);
+        }
+        if (!SERVER_PACKAGE_SOURCE_TYPE.equalsIgnoreCase(baseline.sourceType())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "skill baseline sourceType is unsupported: " + baseline.sourceType());
         }
 
         Instant now = Instant.now();

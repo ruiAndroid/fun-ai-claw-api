@@ -9,7 +9,6 @@ public record SkillBaselineRecord(
         String sourceType,
         String sourceRef,
         boolean enabled,
-        String skillMd,
         String updatedBy,
         Instant createdAt,
         Instant updatedAt

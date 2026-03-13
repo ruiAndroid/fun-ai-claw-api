@@ -16,6 +16,7 @@ import java.util.UUID;
 
 @Service
 public class ManagedSkillAssetService {
+    private static final String SERVER_PACKAGE_SOURCE_TYPE = "SERVER_PACKAGE";
 
     private final InstanceRepository instanceRepository;
     private final InstanceSkillBindingRepository instanceSkillBindingRepository;
@@ -37,8 +38,9 @@ public class ManagedSkillAssetService {
                 .map(binding -> skillBaselineRepository.findBySkillKey(binding.skillKey()).orElse(null))
                 .filter(Objects::nonNull)
                 .filter(SkillBaselineRecord::enabled)
+                .filter(skill -> SERVER_PACKAGE_SOURCE_TYPE.equalsIgnoreCase(skill.sourceType()))
                 .sorted(Comparator.comparing(SkillBaselineRecord::skillKey))
-                .map(skill -> new ManagedSkillAssetPayload(skill.skillKey(), skill.skillMd()))
+                .map(skill -> new ManagedSkillAssetPayload(skill.skillKey(), skill.sourceType(), skill.sourceRef()))
                 .toList();
     }
 }

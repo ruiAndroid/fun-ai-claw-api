@@ -22,7 +22,6 @@ public class SkillBaselineRepository {
             rs.getString("source_type"),
             rs.getString("source_ref"),
             rs.getBoolean("enabled"),
-            rs.getString("skill_md"),
             rs.getString("updated_by"),
             rs.getTimestamp("created_at").toInstant(),
             rs.getTimestamp("updated_at").toInstant()
@@ -40,7 +39,6 @@ public class SkillBaselineRepository {
                                source_type,
                                source_ref,
                                enabled,
-                               skill_md,
                                updated_by,
                                created_at,
                                updated_at
@@ -59,7 +57,6 @@ public class SkillBaselineRepository {
                                source_type,
                                source_ref,
                                enabled,
-                               skill_md,
                                updated_by,
                                created_at,
                                updated_at
@@ -93,19 +90,17 @@ public class SkillBaselineRepository {
                             source_type,
                             source_ref,
                             enabled,
-                            skill_md,
                             updated_by,
                             created_at,
                             updated_at
                         )
-                        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        values (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         on conflict (skill_key) do update
                         set display_name = excluded.display_name,
                             description = excluded.description,
                             source_type = excluded.source_type,
                             source_ref = excluded.source_ref,
                             enabled = excluded.enabled,
-                            skill_md = excluded.skill_md,
                             updated_by = excluded.updated_by,
                             updated_at = excluded.updated_at
                         """,
@@ -115,7 +110,6 @@ public class SkillBaselineRepository {
                 record.sourceType(),
                 record.sourceRef(),
                 record.enabled(),
-                record.skillMd(),
                 record.updatedBy(),
                 Timestamp.from(record.createdAt() != null ? record.createdAt() : now),
                 Timestamp.from(now)

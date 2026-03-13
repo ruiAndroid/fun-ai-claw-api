@@ -17,6 +17,7 @@ import java.util.List;
 
 @Service
 public class SkillBaselineService {
+    private static final String SERVER_PACKAGE_SOURCE_TYPE = "SERVER_PACKAGE";
 
     private final SkillBaselineRepository repository;
     private final InstanceSkillBindingRepository instanceSkillBindingRepository;
@@ -35,6 +36,7 @@ public class SkillBaselineService {
 
     public ListResponse<SkillBaselineSummaryResponse> listBaselines() {
         List<SkillBaselineSummaryResponse> items = repository.findAll().stream()
+                .filter(record -> SERVER_PACKAGE_SOURCE_TYPE.equalsIgnoreCase(record.sourceType()))
                 .map(this::toSummary)
                 .toList();
         return new ListResponse<>(items);
@@ -73,15 +75,16 @@ public class SkillBaselineService {
     private SkillBaselineResponse saveBaseline(String skillKey, SkillBaselineUpsertRequest request) {
         SkillBaselineRecord existing = repository.findBySkillKey(skillKey).orElse(null);
         Instant now = Instant.now();
+        String sourceType = normalizeSkillSourceType(request.sourceType());
+        String sourceRef = normalizeRequiredSourceRef(request.sourceRef());
 
         SkillBaselineRecord record = new SkillBaselineRecord(
                 skillKey,
                 firstNonBlank(request.displayName(), skillKey),
                 trimToNull(request.description()),
-                firstNonBlank(request.sourceType(), "MANUAL"),
-                trimToNull(request.sourceRef()),
+                sourceType,
+                sourceRef,
                 request.enabled() != null ? request.enabled() : true,
-                request.skillMd() != null ? request.skillMd() : "",
                 trimToNull(request.updatedBy()),
                 existing != null ? existing.createdAt() : now,
                 now
@@ -113,7 +116,7 @@ public class SkillBaselineService {
                 record.sourceType(),
                 record.sourceRef(),
                 record.enabled(),
-                countLines(record.skillMd()),
+                0,
                 record.updatedBy(),
                 record.createdAt(),
                 record.updatedAt()
@@ -128,18 +131,10 @@ public class SkillBaselineService {
                 record.sourceType(),
                 record.sourceRef(),
                 record.enabled(),
-                record.skillMd(),
                 record.updatedBy(),
                 record.createdAt(),
                 record.updatedAt()
         );
-    }
-
-    private int countLines(String value) {
-        if (!StringUtils.hasText(value)) {
-            return 0;
-        }
-        return value.split("\\R", -1).length;
     }
 
     private String resolveSkillKey(String explicitSkillKey, SkillBaselineUpsertRequest request) {
@@ -170,6 +165,26 @@ public class SkillBaselineService {
 
     private String normalizeKey(String value) {
         return trimToNull(value);
+    }
+
+    private String normalizeSkillSourceType(String value) {
+        String normalized = trimToNull(value);
+        if (normalized == null) {
+            return SERVER_PACKAGE_SOURCE_TYPE;
+        }
+        if (!SERVER_PACKAGE_SOURCE_TYPE.equalsIgnoreCase(normalized)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "unsupported skill sourceType: " + normalized + ", expected " + SERVER_PACKAGE_SOURCE_TYPE);
+        }
+        return SERVER_PACKAGE_SOURCE_TYPE;
+    }
+
+    private String normalizeRequiredSourceRef(String value) {
+        String normalized = trimToNull(value);
+        if (normalized == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "sourceRef is required");
+        }
+        return normalized;
     }
 
     private String trimToNull(String value) {
