@@ -584,6 +584,9 @@ set skill_md = ''
 where skill_md is null;
 
 alter table skill_baseline
+    alter column skill_md set default '';
+
+alter table skill_baseline
     alter column skill_md set not null;
 
 update skill_baseline
