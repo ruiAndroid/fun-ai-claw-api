@@ -5,6 +5,7 @@ import com.fun.ai.claw.api.model.AgentSystemPromptResponse;
 import com.fun.ai.claw.api.model.CreateInstanceRequest;
 import com.fun.ai.claw.api.model.InstanceActionRequest;
 import com.fun.ai.claw.api.model.InstanceAgentBindingResponse;
+import com.fun.ai.claw.api.model.InstanceChannelsConfigResponse;
 import com.fun.ai.claw.api.model.InstanceConfigResponse;
 import com.fun.ai.claw.api.model.InstanceDefaultModelConfigResponse;
 import com.fun.ai.claw.api.model.InstanceMainAgentGuidanceResponse;
@@ -16,6 +17,7 @@ import com.fun.ai.claw.api.model.PairingCodeResponse;
 import com.fun.ai.claw.api.model.SkillDescriptorResponse;
 import com.fun.ai.claw.api.model.UpsertAgentSystemPromptRequest;
 import com.fun.ai.claw.api.model.UpsertInstanceAgentBindingRequest;
+import com.fun.ai.claw.api.model.UpsertInstanceChannelsConfigRequest;
 import com.fun.ai.claw.api.model.UpsertInstanceConfigRequest;
 import com.fun.ai.claw.api.model.UpsertInstanceDefaultModelConfigRequest;
 import com.fun.ai.claw.api.model.UpsertInstanceMainAgentGuidanceRequest;
@@ -25,6 +27,7 @@ import com.fun.ai.claw.api.service.InstanceAgentBindingService;
 import com.fun.ai.claw.api.service.ControlService;
 import com.fun.ai.claw.api.service.InstanceAgentPromptMutationService;
 import com.fun.ai.claw.api.service.InstanceAgentService;
+import com.fun.ai.claw.api.service.InstanceChannelsConfigService;
 import com.fun.ai.claw.api.service.InstanceConfigMutationService;
 import com.fun.ai.claw.api.service.InstanceConfigService;
 import com.fun.ai.claw.api.service.InstanceDefaultModelConfigService;
@@ -59,6 +62,7 @@ public class InstanceController {
     private final InstanceMainAgentGuidanceService instanceMainAgentGuidanceService;
     private final InstanceConfigService instanceConfigService;
     private final InstanceConfigMutationService instanceConfigMutationService;
+    private final InstanceChannelsConfigService instanceChannelsConfigService;
     private final InstanceDefaultModelConfigService instanceDefaultModelConfigService;
     private final InstanceRoutingConfigService instanceRoutingConfigService;
     private final InstanceSkillBindingService instanceSkillBindingService;
@@ -72,6 +76,7 @@ public class InstanceController {
                               InstanceMainAgentGuidanceService instanceMainAgentGuidanceService,
                               InstanceConfigService instanceConfigService,
                               InstanceConfigMutationService instanceConfigMutationService,
+                              InstanceChannelsConfigService instanceChannelsConfigService,
                               InstanceDefaultModelConfigService instanceDefaultModelConfigService,
                               InstanceRoutingConfigService instanceRoutingConfigService,
                               InstanceSkillBindingService instanceSkillBindingService,
@@ -84,6 +89,7 @@ public class InstanceController {
         this.instanceMainAgentGuidanceService = instanceMainAgentGuidanceService;
         this.instanceConfigService = instanceConfigService;
         this.instanceConfigMutationService = instanceConfigMutationService;
+        this.instanceChannelsConfigService = instanceChannelsConfigService;
         this.instanceDefaultModelConfigService = instanceDefaultModelConfigService;
         this.instanceRoutingConfigService = instanceRoutingConfigService;
         this.instanceSkillBindingService = instanceSkillBindingService;
@@ -183,6 +189,17 @@ public class InstanceController {
     public InstanceConfigResponse upsertInstanceConfig(@PathVariable UUID instanceId,
                                                        @RequestBody UpsertInstanceConfigRequest request) {
         return instanceConfigMutationService.upsert(instanceId, request);
+    }
+
+    @GetMapping("/{instanceId}/channels-config")
+    public InstanceChannelsConfigResponse getInstanceChannelsConfig(@PathVariable UUID instanceId) {
+        return instanceChannelsConfigService.get(instanceId);
+    }
+
+    @PutMapping("/{instanceId}/channels-config")
+    public InstanceChannelsConfigResponse upsertInstanceChannelsConfig(@PathVariable UUID instanceId,
+                                                                      @RequestBody UpsertInstanceChannelsConfigRequest request) {
+        return instanceChannelsConfigService.upsert(instanceId, request);
     }
 
     @DeleteMapping("/{instanceId}/config")
