@@ -351,6 +351,7 @@ create table if not exists agent_baseline (
     allowed_tools_extra_json text not null default '[]',
     denied_tools_json text not null default '[]',
     allowed_tools_json text not null default '[]',
+    allowed_skills_json text not null default '[]',
     system_prompt text null,
     updated_by varchar(128) null,
     created_at timestamptz not null,
@@ -417,6 +418,9 @@ alter table agent_baseline
 alter table agent_baseline
     add column if not exists allowed_tools_json text null;
 
+alter table agent_baseline
+    add column if not exists allowed_skills_json text null;
+
 update agent_baseline
 set allowed_tools_extra_json = coalesce(allowed_tools_json, '[]')
 where allowed_tools_extra_json is null;
@@ -437,6 +441,13 @@ where allowed_tools_json is null;
 
 alter table agent_baseline
     alter column allowed_tools_json set not null;
+
+update agent_baseline
+set allowed_skills_json = '[]'
+where allowed_skills_json is null;
+
+alter table agent_baseline
+    alter column allowed_skills_json set not null;
 
 alter table agent_baseline
     add column if not exists created_at timestamptz;
@@ -498,6 +509,7 @@ create table if not exists instance_agent_binding (
     agentic boolean null,
     system_prompt text null,
     allowed_tools_json text null,
+    allowed_skills_json text not null default '[]',
     extra_config_toml text null,
     updated_by varchar(128) null,
     created_at timestamptz not null,
@@ -524,6 +536,9 @@ alter table instance_agent_binding
     add column if not exists allowed_tools_json text null;
 
 alter table instance_agent_binding
+    add column if not exists allowed_skills_json text null;
+
+alter table instance_agent_binding
     add column if not exists extra_config_toml text null;
 
 alter table instance_agent_binding
@@ -538,6 +553,13 @@ alter table instance_agent_binding
 update instance_agent_binding
 set created_at = now()
 where created_at is null;
+
+update instance_agent_binding
+set allowed_skills_json = '[]'
+where allowed_skills_json is null;
+
+alter table instance_agent_binding
+    alter column allowed_skills_json set not null;
 
 alter table instance_agent_binding
     alter column created_at set not null;

@@ -19,6 +19,7 @@ public record AgentBaselineResponse(
         List<String> allowedToolsExtra,
         List<String> deniedTools,
         List<String> allowedTools,
+        List<String> allowedSkills,
         String systemPrompt,
         String updatedBy,
         Instant createdAt,

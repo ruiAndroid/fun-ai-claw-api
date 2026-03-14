@@ -9,6 +9,7 @@ public record UpsertInstanceAgentBindingRequest(
         Boolean agentic,
         String systemPrompt,
         List<String> allowedTools,
+        List<String> allowedSkills,
         String updatedBy
 ) {
 }

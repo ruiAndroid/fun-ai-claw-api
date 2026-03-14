@@ -28,6 +28,7 @@ class InstanceManagedAgentsConfigServiceTest {
                         true,
                         "test prompt",
                         List.of("delegate"),
+                        List.of("skill-novel-to-script"),
                         null,
                         "tester",
                         null,
@@ -47,6 +48,8 @@ class InstanceManagedAgentsConfigServiceTest {
         assertTrue(rendered.contains("[agents.\"mgc-novel-to-script2\"]"));
         assertTrue(rendered.contains("provider = \"custom:https://api.ai.fun.tv/v1\""));
         assertTrue(rendered.contains("model = \"MiniMax-M2.5\""));
+        assertTrue(rendered.contains("allowed_skills"));
+        assertTrue(rendered.contains("skill-novel-to-script"));
     }
 
     @Test
@@ -62,10 +65,12 @@ class InstanceManagedAgentsConfigServiceTest {
                 [agents."mgc-novel-to-script2"]
                 system_prompt = "test prompt"
                 agentic = true
+                allowed_skills = ["skill-novel-to-script"]
                 """);
 
         assertEquals(1, parsed.size());
         assertEquals("custom:https://api.ai.fun.tv/v1", parsed.get(0).provider());
         assertEquals("MiniMax-M2.5", parsed.get(0).model());
+        assertEquals(List.of("skill-novel-to-script"), parsed.get(0).allowedSkills());
     }
 }

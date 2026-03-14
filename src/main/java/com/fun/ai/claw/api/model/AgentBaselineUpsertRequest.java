@@ -18,6 +18,7 @@ public record AgentBaselineUpsertRequest(
         List<String> allowedToolsExtra,
         List<String> deniedTools,
         List<String> allowedTools,
+        List<String> allowedSkills,
         String systemPrompt,
         String updatedBy
 ) {

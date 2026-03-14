@@ -38,6 +38,7 @@ public class AgentBaselineRepository {
             parseJsonStringArray(rs.getString("allowed_tools_extra_json")),
             parseJsonStringArray(rs.getString("denied_tools_json")),
             parseJsonStringArray(rs.getString("allowed_tools_json")),
+            parseJsonStringArray(rs.getString("allowed_skills_json")),
             rs.getString("system_prompt"),
             rs.getString("updated_by"),
             rs.getTimestamp("created_at").toInstant(),
@@ -65,6 +66,7 @@ public class AgentBaselineRepository {
                                allowed_tools_extra_json,
                                denied_tools_json,
                                allowed_tools_json,
+                               allowed_skills_json,
                                system_prompt,
                                updated_by,
                                created_at,
@@ -93,6 +95,7 @@ public class AgentBaselineRepository {
                                allowed_tools_extra_json,
                                denied_tools_json,
                                allowed_tools_json,
+                               allowed_skills_json,
                                system_prompt,
                                updated_by,
                                created_at,
@@ -136,12 +139,13 @@ public class AgentBaselineRepository {
                             allowed_tools_extra_json,
                             denied_tools_json,
                             allowed_tools_json,
+                            allowed_skills_json,
                             system_prompt,
                             updated_by,
                             created_at,
                             updated_at
                         )
-                        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         on conflict (agent_key) do update
                         set display_name = excluded.display_name,
                             description = excluded.description,
@@ -157,6 +161,7 @@ public class AgentBaselineRepository {
                             allowed_tools_extra_json = excluded.allowed_tools_extra_json,
                             denied_tools_json = excluded.denied_tools_json,
                             allowed_tools_json = excluded.allowed_tools_json,
+                            allowed_skills_json = excluded.allowed_skills_json,
                             system_prompt = excluded.system_prompt,
                             updated_by = excluded.updated_by,
                             updated_at = excluded.updated_at
@@ -176,6 +181,7 @@ public class AgentBaselineRepository {
                 toJsonStringArray(record.allowedToolsExtra()),
                 toJsonStringArray(record.deniedTools()),
                 toJsonStringArray(record.allowedTools()),
+                toJsonStringArray(record.allowedSkills()),
                 record.systemPrompt(),
                 record.updatedBy(),
                 Timestamp.from(record.createdAt() != null ? record.createdAt() : now),

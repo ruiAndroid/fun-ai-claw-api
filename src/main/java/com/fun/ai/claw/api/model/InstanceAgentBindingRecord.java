@@ -13,6 +13,7 @@ public record InstanceAgentBindingRecord(
         Boolean agentic,
         String systemPrompt,
         List<String> allowedTools,
+        List<String> allowedSkills,
         String extraConfigToml,
         String updatedBy,
         Instant createdAt,

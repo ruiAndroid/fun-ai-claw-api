@@ -82,6 +82,7 @@ public class AgentBaselineService {
                 toolSelection.allowedToolsExtra(),
                 toolSelection.deniedTools(),
                 toolSelection.allowedTools(),
+                normalizeSkills(request.allowedSkills(), existing != null ? existing.allowedSkills() : null),
                 trimToNull(request.systemPrompt()),
                 trimToNull(request.updatedBy()),
                 existing != null ? existing.createdAt() : now,
@@ -111,6 +112,7 @@ public class AgentBaselineService {
                 record.allowedToolsExtra(),
                 record.deniedTools(),
                 record.allowedTools(),
+                record.allowedSkills(),
                 record.updatedBy(),
                 record.createdAt(),
                 record.updatedAt()
@@ -134,6 +136,7 @@ public class AgentBaselineService {
                 record.allowedToolsExtra(),
                 record.deniedTools(),
                 record.allowedTools(),
+                record.allowedSkills(),
                 record.systemPrompt(),
                 record.updatedBy(),
                 record.createdAt(),
@@ -245,6 +248,24 @@ public class AgentBaselineService {
             }
         }
         return null;
+    }
+
+    private List<String> normalizeSkills(List<String> requestSkills, List<String> existingSkills) {
+        if (requestSkills != null) {
+            return normalizeSkills(requestSkills);
+        }
+        return normalizeSkills(existingSkills);
+    }
+
+    private List<String> normalizeSkills(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return List.of();
+        }
+        return values.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .distinct()
+                .toList();
     }
 
     private record ToolSelectionState(

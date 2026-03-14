@@ -18,6 +18,7 @@ public record AgentBaselineSummaryResponse(
         List<String> allowedToolsExtra,
         List<String> deniedTools,
         List<String> allowedTools,
+        List<String> allowedSkills,
         String updatedBy,
         Instant createdAt,
         Instant updatedAt

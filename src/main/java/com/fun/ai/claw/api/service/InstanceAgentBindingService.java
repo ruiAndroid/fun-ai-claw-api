@@ -104,6 +104,11 @@ public class InstanceAgentBindingService {
                         existing != null ? existing.allowedTools() : null,
                         baseline != null ? baseline.allowedTools() : null
                 ),
+                normalizeSkills(
+                        request == null ? null : request.allowedSkills(),
+                        existing != null ? existing.allowedSkills() : null,
+                        baseline != null ? baseline.allowedSkills() : null
+                ),
                 existing != null ? existing.extraConfigToml() : null,
                 trimToNull(request == null ? null : request.updatedBy()),
                 existing != null ? existing.createdAt() : now,
@@ -155,6 +160,7 @@ public class InstanceAgentBindingService {
                     record.agentic(),
                     record.systemPrompt(),
                     record.allowedTools(),
+                    record.allowedSkills(),
                     record.extraConfigToml(),
                     "bootstrap",
                     now,
@@ -184,6 +190,7 @@ public class InstanceAgentBindingService {
                 record.agentic(),
                 record.systemPrompt(),
                 record.allowedTools(),
+                record.allowedSkills(),
                 record.updatedBy(),
                 record.createdAt(),
                 record.updatedAt()
@@ -256,11 +263,25 @@ public class InstanceAgentBindingService {
     private List<String> normalizeTools(List<String> requestTools, List<String> existingTools, List<String> baselineTools) {
         if (requestTools == null) {
             if (existingTools != null) {
-                return existingTools;
+                return normalizeStringList(existingTools);
             }
-            return baselineTools == null ? List.of() : baselineTools;
+            return baselineTools == null ? List.of() : normalizeStringList(baselineTools);
         }
-        return requestTools.stream()
+        return normalizeStringList(requestTools);
+    }
+
+    private List<String> normalizeSkills(List<String> requestSkills, List<String> existingSkills, List<String> baselineSkills) {
+        if (requestSkills == null) {
+            if (existingSkills != null) {
+                return normalizeStringList(existingSkills);
+            }
+            return baselineSkills == null ? List.of() : normalizeStringList(baselineSkills);
+        }
+        return normalizeStringList(requestSkills);
+    }
+
+    private List<String> normalizeStringList(List<String> values) {
+        return values.stream()
                 .filter(StringUtils::hasText)
                 .map(String::trim)
                 .distinct()

@@ -34,6 +34,7 @@ public class InstanceManagedAgentsConfigService {
     private static final Pattern SYSTEM_PROMPT_MULTILINE_LITERAL_PATTERN = Pattern.compile("(?ms)^\\s*system_prompt\\s*=\\s*'''(.*?)'''\\s*$");
     private static final Pattern AGENTIC_PATTERN = Pattern.compile("(?m)^\\s*agentic\\s*=\\s*(true|false)\\s*$", Pattern.CASE_INSENSITIVE);
     private static final Pattern ALLOWED_TOOLS_PATTERN = Pattern.compile("(?ms)^\\s*allowed_tools\\s*=\\s*\\[(.*?)]\\s*$");
+    private static final Pattern ALLOWED_SKILLS_PATTERN = Pattern.compile("(?ms)^\\s*allowed_skills\\s*=\\s*\\[(.*?)]\\s*$");
     private static final Pattern ARRAY_QUOTED_STRING_PATTERN = Pattern.compile("\"((?:\\\\.|[^\"\\\\])*)\"|'((?:\\\\.|[^'\\\\])*)'");
 
     private final InstanceAgentBindingRepository instanceAgentBindingRepository;
@@ -119,6 +120,7 @@ public class InstanceManagedAgentsConfigService {
                     findBooleanValue(AGENTIC_PATTERN, block),
                     findSystemPromptValue(block),
                     findStringArrayValue(ALLOWED_TOOLS_PATTERN, block),
+                    findStringArrayValue(ALLOWED_SKILLS_PATTERN, block),
                     stripManagedProperties(block),
                     "bootstrap",
                     null,
@@ -148,6 +150,7 @@ public class InstanceManagedAgentsConfigService {
         appendMultilineProperty(builder, "system_prompt", record.systemPrompt());
         appendBooleanProperty(builder, "agentic", record.agentic());
         appendStringArrayProperty(builder, "allowed_tools", record.allowedTools());
+        appendStringArrayProperty(builder, "allowed_skills", record.allowedSkills());
         appendExtraConfig(builder, record.extraConfigToml());
         return builder.toString().stripTrailing() + "\n";
     }
@@ -234,6 +237,7 @@ public class InstanceManagedAgentsConfigService {
         normalized = SYSTEM_PROMPT_MULTILINE_LITERAL_PATTERN.matcher(normalized).replaceAll("");
         normalized = AGENTIC_PATTERN.matcher(normalized).replaceAll("");
         normalized = ALLOWED_TOOLS_PATTERN.matcher(normalized).replaceAll("");
+        normalized = ALLOWED_SKILLS_PATTERN.matcher(normalized).replaceAll("");
         normalized = normalized.replaceAll("(?m)^[ \\t]*\\r?\\n", "");
         String trimmed = normalized.strip();
         return trimmed.isEmpty() ? null : trimmed + "\n";
@@ -261,6 +265,7 @@ public class InstanceManagedAgentsConfigService {
                 record.agentic(),
                 record.systemPrompt(),
                 record.allowedTools(),
+                record.allowedSkills(),
                 record.extraConfigToml(),
                 record.updatedBy(),
                 record.createdAt(),

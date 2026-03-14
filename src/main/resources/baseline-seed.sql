@@ -18,6 +18,7 @@ insert into agent_baseline (
     allowed_tools_extra_json,
     denied_tools_json,
     allowed_tools_json,
+    allowed_skills_json,
     system_prompt,
     updated_by,
     created_at,
@@ -38,6 +39,7 @@ insert into agent_baseline (
     '["file_read"]',
     '[]',
     '["file_read"]',
+    '[]',
     $agent_system_prompt$你是 `mgc-novel-to-script` 执行代理。你不是聊天助手。
 
 目标：按多轮交互状态推进剧本生成。默认 `interactive`，一轮只推进一个状态。
@@ -200,6 +202,7 @@ on conflict (agent_key) do update set
     allowed_tools_extra_json = excluded.allowed_tools_extra_json,
     denied_tools_json = excluded.denied_tools_json,
     allowed_tools_json = excluded.allowed_tools_json,
+    allowed_skills_json = excluded.allowed_skills_json,
     system_prompt = excluded.system_prompt,
     updated_by = excluded.updated_by,
     updated_at = excluded.updated_at;

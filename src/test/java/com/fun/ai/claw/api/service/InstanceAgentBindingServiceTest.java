@@ -72,6 +72,7 @@ class InstanceAgentBindingServiceTest {
                 List.of("file_read"),
                 List.of(),
                 List.of("file_read"),
+                List.of("skill-novel-to-script"),
                 "prompt",
                 "tester",
                 now,
@@ -90,6 +91,7 @@ class InstanceAgentBindingServiceTest {
                                 true,
                                 "prompt",
                                 List.of("file_read"),
+                                List.of("skill-novel-to-script"),
                                 null,
                                 "ui-dashboard",
                                 now,
@@ -128,7 +130,7 @@ class InstanceAgentBindingServiceTest {
         var response = service.upsert(
                 instanceId,
                 "mgc-novel-to-script2",
-                new UpsertInstanceAgentBindingRequest(null, null, null, null, null, null, "ui-dashboard")
+                new UpsertInstanceAgentBindingRequest(null, null, null, null, null, null, null, "ui-dashboard")
         );
 
         ArgumentCaptor<com.fun.ai.claw.api.model.InstanceAgentBindingRecord> captor =
@@ -137,7 +139,9 @@ class InstanceAgentBindingServiceTest {
 
         assertTrue(Boolean.TRUE.equals(captor.getValue().agentic()));
         assertEquals(List.of("file_read"), captor.getValue().allowedTools());
+        assertEquals(List.of("skill-novel-to-script"), captor.getValue().allowedSkills());
         assertTrue(Boolean.TRUE.equals(response.agentic()));
         assertEquals(List.of("file_read"), response.allowedTools());
+        assertEquals(List.of("skill-novel-to-script"), response.allowedSkills());
     }
 }

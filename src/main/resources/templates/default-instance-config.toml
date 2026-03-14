@@ -160,7 +160,7 @@ max_tasks = 64
 max_concurrent = 4
 
 [agent]
-max_tool_iterations = 6
+max_tool_iterations = 10
 compact_context = false
 max_history_messages = 25
 parallel_tools = false

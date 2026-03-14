@@ -47,6 +47,7 @@ class AgentBaselineServiceTest {
                             List.of("file_read", "file_write"),
                             List.of(),
                             List.of("file_read", "file_write"),
+                            List.of(),
                             null,
                             "tester",
                             now,
@@ -70,6 +71,7 @@ class AgentBaselineServiceTest {
                 null,
                 null,
                 List.of("file_read", "file_write"),
+                null,
                 null,
                 "tester"
         ));
@@ -105,6 +107,7 @@ class AgentBaselineServiceTest {
                 List.of("file_edit"),
                 List.of("content_search"),
                 List.of("file_read", "glob_search", "file_write", "file_edit"),
+                List.of(),
                 null,
                 "tester",
                 Instant.now(),
@@ -126,6 +129,7 @@ class AgentBaselineServiceTest {
                 "writer_basic",
                 List.of("file_edit"),
                 List.of("content_search"),
+                null,
                 null,
                 null,
                 "tester"

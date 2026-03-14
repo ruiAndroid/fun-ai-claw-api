@@ -31,6 +31,7 @@ public class InstanceAgentBindingRepository {
             rs.getObject("agentic") == null ? null : rs.getBoolean("agentic"),
             rs.getString("system_prompt"),
             parseJsonStringArray(rs.getString("allowed_tools_json")),
+            parseJsonStringArray(rs.getString("allowed_skills_json")),
             rs.getString("extra_config_toml"),
             rs.getString("updated_by"),
             rs.getTimestamp("created_at").toInstant(),
@@ -51,6 +52,7 @@ public class InstanceAgentBindingRepository {
                                agentic,
                                system_prompt,
                                allowed_tools_json,
+                               allowed_skills_json,
                                extra_config_toml,
                                updated_by,
                                created_at,
@@ -75,12 +77,13 @@ public class InstanceAgentBindingRepository {
                             agentic,
                             system_prompt,
                             allowed_tools_json,
+                            allowed_skills_json,
                             extra_config_toml,
                             updated_by,
                             created_at,
                             updated_at
                         )
-                        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         on conflict (instance_id, agent_key) do update
                         set provider = excluded.provider,
                             model = excluded.model,
@@ -88,6 +91,7 @@ public class InstanceAgentBindingRepository {
                             agentic = excluded.agentic,
                             system_prompt = excluded.system_prompt,
                             allowed_tools_json = excluded.allowed_tools_json,
+                            allowed_skills_json = excluded.allowed_skills_json,
                             extra_config_toml = excluded.extra_config_toml,
                             updated_by = excluded.updated_by,
                             updated_at = excluded.updated_at
@@ -100,6 +104,7 @@ public class InstanceAgentBindingRepository {
                 record.agentic(),
                 record.systemPrompt(),
                 toJsonStringArray(record.allowedTools()),
+                toJsonStringArray(record.allowedSkills()),
                 record.extraConfigToml(),
                 record.updatedBy(),
                 Timestamp.from(record.createdAt() != null ? record.createdAt() : now),
