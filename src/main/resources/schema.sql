@@ -347,7 +347,10 @@ create table if not exists agent_baseline (
     model varchar(255) null,
     temperature double precision null,
     agentic boolean null,
-    allowed_tools_json text null,
+    tool_preset_key varchar(64) null,
+    allowed_tools_extra_json text not null default '[]',
+    denied_tools_json text not null default '[]',
+    allowed_tools_json text not null default '[]',
     system_prompt text null,
     updated_by varchar(128) null,
     created_at timestamptz not null,
@@ -391,6 +394,15 @@ alter table agent_baseline
     add column if not exists agentic boolean null;
 
 alter table agent_baseline
+    add column if not exists tool_preset_key varchar(64) null;
+
+alter table agent_baseline
+    add column if not exists allowed_tools_extra_json text not null default '[]';
+
+alter table agent_baseline
+    add column if not exists denied_tools_json text not null default '[]';
+
+alter table agent_baseline
     add column if not exists system_prompt text null;
 
 alter table agent_baseline
@@ -404,6 +416,27 @@ alter table agent_baseline
 
 alter table agent_baseline
     add column if not exists allowed_tools_json text null;
+
+update agent_baseline
+set allowed_tools_extra_json = coalesce(allowed_tools_json, '[]')
+where allowed_tools_extra_json is null;
+
+alter table agent_baseline
+    alter column allowed_tools_extra_json set not null;
+
+update agent_baseline
+set denied_tools_json = '[]'
+where denied_tools_json is null;
+
+alter table agent_baseline
+    alter column denied_tools_json set not null;
+
+update agent_baseline
+set allowed_tools_json = '[]'
+where allowed_tools_json is null;
+
+alter table agent_baseline
+    alter column allowed_tools_json set not null;
 
 alter table agent_baseline
     add column if not exists created_at timestamptz;

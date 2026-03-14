@@ -14,6 +14,9 @@ public record AgentBaselineUpsertRequest(
         String model,
         Double temperature,
         Boolean agentic,
+        String toolPresetKey,
+        List<String> allowedToolsExtra,
+        List<String> deniedTools,
         List<String> allowedTools,
         String systemPrompt,
         String updatedBy

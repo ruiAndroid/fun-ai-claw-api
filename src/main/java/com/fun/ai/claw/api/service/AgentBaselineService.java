@@ -19,9 +19,12 @@ import java.util.List;
 public class AgentBaselineService {
 
     private final AgentBaselineRepository repository;
+    private final AgentToolCatalogService agentToolCatalogService;
 
-    public AgentBaselineService(AgentBaselineRepository repository) {
+    public AgentBaselineService(AgentBaselineRepository repository,
+                                AgentToolCatalogService agentToolCatalogService) {
         this.repository = repository;
+        this.agentToolCatalogService = agentToolCatalogService;
     }
 
     public ListResponse<AgentBaselineSummaryResponse> listBaselines() {
@@ -61,6 +64,7 @@ public class AgentBaselineService {
     private AgentBaselineResponse saveBaseline(String agentKey, AgentBaselineUpsertRequest request) {
         AgentBaselineRecord existing = repository.findByAgentKey(agentKey).orElse(null);
         Instant now = Instant.now();
+        ToolSelectionState toolSelection = resolveToolSelection(request, existing);
 
         AgentBaselineRecord record = new AgentBaselineRecord(
                 agentKey,
@@ -74,7 +78,10 @@ public class AgentBaselineService {
                 trimToNull(request.model()),
                 request.temperature(),
                 request.agentic(),
-                normalizeTools(request.allowedTools(), existing != null ? existing.allowedTools() : null),
+                toolSelection.toolPresetKey(),
+                toolSelection.allowedToolsExtra(),
+                toolSelection.deniedTools(),
+                toolSelection.allowedTools(),
                 trimToNull(request.systemPrompt()),
                 trimToNull(request.updatedBy()),
                 existing != null ? existing.createdAt() : now,
@@ -100,6 +107,9 @@ public class AgentBaselineService {
                 record.model(),
                 record.temperature(),
                 record.agentic(),
+                record.toolPresetKey(),
+                record.allowedToolsExtra(),
+                record.deniedTools(),
                 record.allowedTools(),
                 record.updatedBy(),
                 record.createdAt(),
@@ -120,6 +130,9 @@ public class AgentBaselineService {
                 record.model(),
                 record.temperature(),
                 record.agentic(),
+                record.toolPresetKey(),
+                record.allowedToolsExtra(),
+                record.deniedTools(),
                 record.allowedTools(),
                 record.systemPrompt(),
                 record.updatedBy(),
@@ -154,15 +167,63 @@ public class AgentBaselineService {
         return normalized;
     }
 
-    private List<String> normalizeTools(List<String> requestTools, List<String> existingTools) {
-        if (requestTools == null) {
-            return existingTools == null ? List.of() : existingTools;
+    private ToolSelectionState resolveToolSelection(AgentBaselineUpsertRequest request, AgentBaselineRecord existing) {
+        ToolSelectionState existingSelection = toToolSelectionState(existing);
+
+        boolean hasStructuredUpdate = request.toolPresetKey() != null
+                || request.allowedToolsExtra() != null
+                || request.deniedTools() != null;
+
+        if (hasStructuredUpdate) {
+            String toolPresetKey = request.toolPresetKey() != null
+                    ? agentToolCatalogService.normalizePresetKey(request.toolPresetKey())
+                    : existingSelection.toolPresetKey();
+            List<String> allowedToolsExtra = request.allowedToolsExtra() != null
+                    ? agentToolCatalogService.normalizeTools(request.allowedToolsExtra())
+                    : existingSelection.allowedToolsExtra();
+            List<String> deniedTools = request.deniedTools() != null
+                    ? agentToolCatalogService.normalizeTools(request.deniedTools())
+                    : existingSelection.deniedTools();
+            return new ToolSelectionState(
+                    toolPresetKey,
+                    allowedToolsExtra,
+                    deniedTools,
+                    agentToolCatalogService.resolveTools(toolPresetKey, allowedToolsExtra, deniedTools)
+            );
         }
-        return requestTools.stream()
-                .filter(StringUtils::hasText)
-                .map(String::trim)
-                .distinct()
-                .toList();
+
+        if (request.allowedTools() != null) {
+            List<String> allowedToolsExtra = agentToolCatalogService.normalizeTools(request.allowedTools());
+            return new ToolSelectionState(
+                    null,
+                    allowedToolsExtra,
+                    List.of(),
+                    agentToolCatalogService.resolveTools(null, allowedToolsExtra, List.of())
+            );
+        }
+
+        return existingSelection;
+    }
+
+    private ToolSelectionState toToolSelectionState(AgentBaselineRecord record) {
+        if (record == null) {
+            return new ToolSelectionState(null, List.of(), List.of(), List.of());
+        }
+
+        String toolPresetKey = agentToolCatalogService.normalizePresetKey(record.toolPresetKey());
+        List<String> allowedToolsExtra = agentToolCatalogService.normalizeTools(record.allowedToolsExtra());
+        List<String> deniedTools = agentToolCatalogService.normalizeTools(record.deniedTools());
+
+        if (toolPresetKey == null && allowedToolsExtra.isEmpty() && deniedTools.isEmpty()) {
+            allowedToolsExtra = agentToolCatalogService.normalizeTools(record.allowedTools());
+        }
+
+        return new ToolSelectionState(
+                toolPresetKey,
+                allowedToolsExtra,
+                deniedTools,
+                agentToolCatalogService.resolveTools(toolPresetKey, allowedToolsExtra, deniedTools)
+        );
     }
 
     private String normalizeKey(String value) {
@@ -184,5 +245,13 @@ public class AgentBaselineService {
             }
         }
         return null;
+    }
+
+    private record ToolSelectionState(
+            String toolPresetKey,
+            List<String> allowedToolsExtra,
+            List<String> deniedTools,
+            List<String> allowedTools
+    ) {
     }
 }
