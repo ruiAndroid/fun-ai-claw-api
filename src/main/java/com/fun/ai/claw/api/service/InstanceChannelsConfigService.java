@@ -27,6 +27,11 @@ public class InstanceChannelsConfigService {
     private static final Pattern DINGTALK_CLIENT_SECRET_LINE_PATTERN = Pattern.compile("(?m)^\\s*client_secret\\s*=.*(?:\\R|$)");
     private static final Pattern QQ_APP_ID_LINE_PATTERN = Pattern.compile("(?m)^\\s*app_id\\s*=.*(?:\\R|$)");
     private static final Pattern QQ_APP_SECRET_LINE_PATTERN = Pattern.compile("(?m)^\\s*app_secret\\s*=.*(?:\\R|$)");
+    private static final Pattern WECOM_CORP_ID_LINE_PATTERN = Pattern.compile("(?m)^\\s*corp_id\\s*=.*(?:\\R|$)");
+    private static final Pattern WECOM_AGENT_ID_LINE_PATTERN = Pattern.compile("(?m)^\\s*agent_id\\s*=.*(?:\\R|$)");
+    private static final Pattern WECOM_SECRET_LINE_PATTERN = Pattern.compile("(?m)^\\s*secret\\s*=.*(?:\\R|$)");
+    private static final Pattern WECOM_TOKEN_LINE_PATTERN = Pattern.compile("(?m)^\\s*token\\s*=.*(?:\\R|$)");
+    private static final Pattern WECOM_ENCODING_AES_KEY_LINE_PATTERN = Pattern.compile("(?m)^\\s*encoding_aes_key\\s*=.*(?:\\R|$)");
 
     private static final Pattern CLI_PATTERN = Pattern.compile("(?m)^\\s*cli\\s*=\\s*(true|false)\\s*$");
     private static final Pattern MESSAGE_TIMEOUT_PATTERN = Pattern.compile("(?m)^\\s*message_timeout_secs\\s*=\\s*(\\d+)\\s*$");
@@ -38,6 +43,16 @@ public class InstanceChannelsConfigService {
     private static final Pattern QQ_APP_ID_LITERAL_PATTERN = Pattern.compile("(?m)^\\s*app_id\\s*=\\s*'([^'\\r\\n]*)'\\s*$");
     private static final Pattern QQ_APP_SECRET_BASIC_PATTERN = Pattern.compile("(?m)^\\s*app_secret\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
     private static final Pattern QQ_APP_SECRET_LITERAL_PATTERN = Pattern.compile("(?m)^\\s*app_secret\\s*=\\s*'([^'\\r\\n]*)'\\s*$");
+    private static final Pattern WECOM_CORP_ID_BASIC_PATTERN = Pattern.compile("(?m)^\\s*corp_id\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
+    private static final Pattern WECOM_CORP_ID_LITERAL_PATTERN = Pattern.compile("(?m)^\\s*corp_id\\s*=\\s*'([^'\\r\\n]*)'\\s*$");
+    private static final Pattern WECOM_AGENT_ID_BASIC_PATTERN = Pattern.compile("(?m)^\\s*agent_id\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
+    private static final Pattern WECOM_AGENT_ID_LITERAL_PATTERN = Pattern.compile("(?m)^\\s*agent_id\\s*=\\s*'([^'\\r\\n]*)'\\s*$");
+    private static final Pattern WECOM_SECRET_BASIC_PATTERN = Pattern.compile("(?m)^\\s*secret\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
+    private static final Pattern WECOM_SECRET_LITERAL_PATTERN = Pattern.compile("(?m)^\\s*secret\\s*=\\s*'([^'\\r\\n]*)'\\s*$");
+    private static final Pattern WECOM_TOKEN_BASIC_PATTERN = Pattern.compile("(?m)^\\s*token\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
+    private static final Pattern WECOM_TOKEN_LITERAL_PATTERN = Pattern.compile("(?m)^\\s*token\\s*=\\s*'([^'\\r\\n]*)'\\s*$");
+    private static final Pattern WECOM_ENCODING_AES_KEY_BASIC_PATTERN = Pattern.compile("(?m)^\\s*encoding_aes_key\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
+    private static final Pattern WECOM_ENCODING_AES_KEY_LITERAL_PATTERN = Pattern.compile("(?m)^\\s*encoding_aes_key\\s*=\\s*'([^'\\r\\n]*)'\\s*$");
 
     private final InstanceConfigService instanceConfigService;
     private final InstanceConfigMutationService instanceConfigMutationService;
@@ -71,15 +86,20 @@ public class InstanceChannelsConfigService {
                 ? request.dingtalkEnabled()
                 : currentParsed.dingtalk().enabled();
         boolean qqEnabled = request.qqEnabled() != null ? request.qqEnabled() : currentParsed.qq().enabled();
+        boolean wecomEnabled = request.wecomEnabled() != null
+                ? request.wecomEnabled()
+                : currentParsed.wecom().enabled();
 
         ChannelSectionState dingtalkState = resolveDingTalkState(currentParsed.dingtalk(), request, dingtalkEnabled);
         ChannelSectionState qqState = resolveQqState(currentParsed.qq(), request, qqEnabled);
+        WeComSectionState wecomState = resolveWeComState(currentParsed.wecom(), request, wecomEnabled);
 
         String updatedToml = rewriteConfig(
                 currentParsed,
                 new RootSectionState(cliEnabled, messageTimeoutSecs, currentParsed.root().extras()),
                 dingtalkState,
-                qqState
+                qqState,
+                wecomState
         );
 
         InstanceConfigResponse persisted = instanceConfigMutationService.upsert(
@@ -136,6 +156,53 @@ public class InstanceChannelsConfigService {
         return new ChannelSectionState(true, appId, appSecret, allowedUsers, current.extras(), "channels_config.qq");
     }
 
+    private WeComSectionState resolveWeComState(ParsedWeComSection current,
+                                                UpsertInstanceChannelsConfigRequest request,
+                                                boolean enabled) {
+        if (!enabled) {
+            return new WeComSectionState(false, null, null, null, null, null, List.of(), current.extras());
+        }
+        String corpId = resolveRequiredString(
+                request.wecomCorpId(),
+                current.corpId(),
+                "wecomCorpId"
+        );
+        String agentId = resolveRequiredString(
+                request.wecomAgentId(),
+                current.agentId(),
+                "wecomAgentId"
+        );
+        String secret = resolveRequiredSecret(
+                request.wecomSecret(),
+                current.secret(),
+                "wecomSecret"
+        );
+        String token = resolveRequiredSecret(
+                request.wecomToken(),
+                current.token(),
+                "wecomToken"
+        );
+        String encodingAesKey = resolveRequiredSecret(
+                request.wecomEncodingAesKey(),
+                current.encodingAesKey(),
+                "wecomEncodingAesKey"
+        );
+        List<String> allowedUsers = normalizeStringList(
+                request.wecomAllowedUsers(),
+                current.allowedUsers()
+        );
+        return new WeComSectionState(
+                true,
+                corpId,
+                agentId,
+                secret,
+                token,
+                encodingAesKey,
+                allowedUsers,
+                current.extras()
+        );
+    }
+
     private InstanceChannelsConfigResponse buildResponse(InstanceConfigResponse config,
                                                          ParsedChannelsConfig parsed) {
         return new InstanceChannelsConfigResponse(
@@ -154,6 +221,13 @@ public class InstanceChannelsConfigService {
                 nullToEmpty(parsed.qq().appId()),
                 maskSecret(parsed.qq().appSecret()),
                 parsed.qq().allowedUsers(),
+                parsed.wecom().enabled(),
+                nullToEmpty(parsed.wecom().corpId()),
+                nullToEmpty(parsed.wecom().agentId()),
+                maskSecret(parsed.wecom().secret()),
+                maskSecret(parsed.wecom().token()),
+                maskSecret(parsed.wecom().encodingAesKey()),
+                parsed.wecom().allowedUsers(),
                 config.overrideUpdatedAt(),
                 config.overrideUpdatedBy()
         );
@@ -165,6 +239,7 @@ public class InstanceChannelsConfigService {
         SectionBlock rootSection = findSection(document.sections(), "channels_config");
         SectionBlock dingtalkSection = findSection(document.sections(), "channels_config.dingtalk");
         SectionBlock qqSection = findSection(document.sections(), "channels_config.qq");
+        SectionBlock wecomSection = findSection(document.sections(), "channels_config.wecom");
         List<SectionBlock> preservedGroupSections = document.sections().stream()
                 .filter(section -> isChannelsGroup(section.headerName()))
                 .filter(section -> !isManagedChannelsHeader(section.headerName()))
@@ -173,8 +248,9 @@ public class InstanceChannelsConfigService {
         ParsedRootSection root = parseRootSection(rootSection);
         ParsedDingTalkSection dingtalk = parseDingTalkSection(dingtalkSection);
         ParsedQqSection qq = parseQqSection(qqSection);
+        ParsedWeComSection wecom = parseWeComSection(wecomSection);
 
-        return new ParsedChannelsConfig(document, root, dingtalk, qq, preservedGroupSections);
+        return new ParsedChannelsConfig(document, root, dingtalk, qq, wecom, preservedGroupSections);
     }
 
     private ParsedRootSection parseRootSection(SectionBlock section) {
@@ -217,6 +293,35 @@ public class InstanceChannelsConfigService {
         return new ParsedQqSection(true, appId, appSecret, allowedUsers, extras);
     }
 
+    private ParsedWeComSection parseWeComSection(SectionBlock section) {
+        if (section == null) {
+            return new ParsedWeComSection(false, null, null, null, null, null, List.of(), "");
+        }
+        String body = extractSectionBody(section);
+        String corpId = findStringValue(body, WECOM_CORP_ID_BASIC_PATTERN, WECOM_CORP_ID_LITERAL_PATTERN);
+        String agentId = findStringValue(body, WECOM_AGENT_ID_BASIC_PATTERN, WECOM_AGENT_ID_LITERAL_PATTERN);
+        String secret = findStringValue(body, WECOM_SECRET_BASIC_PATTERN, WECOM_SECRET_LITERAL_PATTERN);
+        String token = findStringValue(body, WECOM_TOKEN_BASIC_PATTERN, WECOM_TOKEN_LITERAL_PATTERN);
+        String encodingAesKey = findStringValue(
+                body,
+                WECOM_ENCODING_AES_KEY_BASIC_PATTERN,
+                WECOM_ENCODING_AES_KEY_LITERAL_PATTERN
+        );
+        List<String> allowedUsers = findStringArrayValue(body, "allowed_users");
+        String extras = cleanupExtras(removeAllowedUsersProperty(
+                WECOM_ENCODING_AES_KEY_LINE_PATTERN.matcher(
+                        WECOM_TOKEN_LINE_PATTERN.matcher(
+                                WECOM_SECRET_LINE_PATTERN.matcher(
+                                        WECOM_AGENT_ID_LINE_PATTERN.matcher(
+                                                WECOM_CORP_ID_LINE_PATTERN.matcher(body).replaceAll("")
+                                        ).replaceAll("")
+                                ).replaceAll("")
+                        ).replaceAll("")
+                ).replaceAll("")
+        ));
+        return new ParsedWeComSection(true, corpId, agentId, secret, token, encodingAesKey, allowedUsers, extras);
+    }
+
     private String removeKnownRootProperties(String body) {
         return MESSAGE_TIMEOUT_LINE_PATTERN.matcher(CLI_LINE_PATTERN.matcher(body).replaceAll("")).replaceAll("");
     }
@@ -224,14 +329,16 @@ public class InstanceChannelsConfigService {
     private String rewriteConfig(ParsedChannelsConfig current,
                                  RootSectionState root,
                                  ChannelSectionState dingtalk,
-                                 ChannelSectionState qq) {
-        String renderedGroup = renderChannelsGroup(root, dingtalk, qq, current.preservedGroupSections());
+                                 ChannelSectionState qq,
+                                 WeComSectionState wecom) {
+        String renderedGroup = renderChannelsGroup(root, dingtalk, qq, wecom, current.preservedGroupSections());
         return rebuildDocument(current.document(), renderedGroup);
     }
 
     private String renderChannelsGroup(RootSectionState root,
                                        ChannelSectionState dingtalk,
                                        ChannelSectionState qq,
+                                       WeComSectionState wecom,
                                        List<SectionBlock> preservedGroupSections) {
         List<String> blocks = new ArrayList<>();
         blocks.add(renderRootSection(root));
@@ -240,6 +347,9 @@ public class InstanceChannelsConfigService {
         }
         if (qq.enabled()) {
             blocks.add(renderChannelSection(qq, "app_id", "app_secret"));
+        }
+        if (wecom.enabled()) {
+            blocks.add(renderWeComSection(wecom));
         }
         preservedGroupSections.stream()
                 .map(SectionBlock::rawText)
@@ -263,6 +373,19 @@ public class InstanceChannelsConfigService {
         builder.append('[').append(state.headerName()).append("]\n");
         builder.append(idKey).append(" = ").append(renderTomlString(state.idValue())).append('\n');
         builder.append(secretKey).append(" = ").append(renderTomlString(state.secretValue())).append('\n');
+        builder.append("allowed_users = ").append(renderTomlStringArray(state.allowedUsers())).append('\n');
+        appendExtras(builder, state.extras());
+        return builder.toString().strip();
+    }
+
+    private String renderWeComSection(WeComSectionState state) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("[channels_config.wecom]\n");
+        builder.append("corp_id = ").append(renderTomlString(state.corpId())).append('\n');
+        builder.append("agent_id = ").append(renderTomlString(state.agentId())).append('\n');
+        builder.append("secret = ").append(renderTomlString(state.secret())).append('\n');
+        builder.append("token = ").append(renderTomlString(state.token())).append('\n');
+        builder.append("encoding_aes_key = ").append(renderTomlString(state.encodingAesKey())).append('\n');
         builder.append("allowed_users = ").append(renderTomlStringArray(state.allowedUsers())).append('\n');
         appendExtras(builder, state.extras());
         return builder.toString().strip();
@@ -347,7 +470,8 @@ public class InstanceChannelsConfigService {
     private boolean isManagedChannelsHeader(String headerName) {
         return "channels_config".equals(headerName)
                 || "channels_config.dingtalk".equals(headerName)
-                || "channels_config.qq".equals(headerName);
+                || "channels_config.qq".equals(headerName)
+                || "channels_config.wecom".equals(headerName);
     }
 
     private String normalizeHeader(String rawHeader) {
@@ -688,6 +812,7 @@ public class InstanceChannelsConfigService {
             ParsedRootSection root,
             ParsedDingTalkSection dingtalk,
             ParsedQqSection qq,
+            ParsedWeComSection wecom,
             List<SectionBlock> preservedGroupSections
     ) {
     }
@@ -735,6 +860,18 @@ public class InstanceChannelsConfigService {
     ) {
     }
 
+    private record ParsedWeComSection(
+            boolean enabled,
+            String corpId,
+            String agentId,
+            String secret,
+            String token,
+            String encodingAesKey,
+            List<String> allowedUsers,
+            String extras
+    ) {
+    }
+
     private record RootSectionState(
             boolean cliEnabled,
             long messageTimeoutSecs,
@@ -749,6 +886,18 @@ public class InstanceChannelsConfigService {
             List<String> allowedUsers,
             String extras,
             String headerName
+    ) {
+    }
+
+    private record WeComSectionState(
+            boolean enabled,
+            String corpId,
+            String agentId,
+            String secret,
+            String token,
+            String encodingAesKey,
+            List<String> allowedUsers,
+            String extras
     ) {
     }
 

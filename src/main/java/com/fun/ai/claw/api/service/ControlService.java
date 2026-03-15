@@ -185,6 +185,7 @@ public class ControlService {
     public void submitInstanceAction(UUID instanceId, InstanceActionRequest request) {
         ClawInstanceDto instance = getInstance(instanceId);
         Instant now = Instant.now();
+        validateActionAgainstInstanceState(instance, request.action());
 
         InstanceDesiredState desiredState = desiredStateForAction(request.action());
         PlaneClient.PlaneTaskExecutionRecord execution;
@@ -269,15 +270,21 @@ public class ControlService {
     private InstanceDesiredState desiredStateForAction(InstanceActionType action) {
         return switch (action) {
             case STOP -> InstanceDesiredState.STOPPED;
-            case START, RESTART, ROLLBACK -> InstanceDesiredState.RUNNING;
+            case START, RESTART, RESTART_ZEROCLAW, ROLLBACK -> InstanceDesiredState.RUNNING;
         };
     }
 
     private InstanceStatus statusForSuccessfulAction(InstanceActionType action) {
         return switch (action) {
             case STOP -> InstanceStatus.STOPPED;
-            case START, RESTART, ROLLBACK -> InstanceStatus.RUNNING;
+            case START, RESTART, RESTART_ZEROCLAW, ROLLBACK -> InstanceStatus.RUNNING;
         };
+    }
+
+    private void validateActionAgainstInstanceState(ClawInstanceDto instance, InstanceActionType action) {
+        if (action == InstanceActionType.RESTART_ZEROCLAW && instance.status() != InstanceStatus.RUNNING) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "instance must be running to restart zeroclaw");
+        }
     }
 
     private int allocateGatewayPort(UUID hostId) {
@@ -441,4 +448,3 @@ public class ControlService {
     private record PlaneExecutionResult(PlaneClient.PlaneTaskExecutionRecord execution, Integer gatewayHostPort) {
     }
 }
-

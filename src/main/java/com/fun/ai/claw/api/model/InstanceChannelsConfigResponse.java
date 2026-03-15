@@ -20,6 +20,13 @@ public record InstanceChannelsConfigResponse(
         String qqAppId,
         String qqAppSecret,
         List<String> qqAllowedUsers,
+        boolean wecomEnabled,
+        String wecomCorpId,
+        String wecomAgentId,
+        String wecomSecret,
+        String wecomToken,
+        String wecomEncodingAesKey,
+        List<String> wecomAllowedUsers,
         Instant overrideUpdatedAt,
         String overrideUpdatedBy
 ) {

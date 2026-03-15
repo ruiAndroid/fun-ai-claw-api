@@ -13,6 +13,13 @@ public record UpsertInstanceChannelsConfigRequest(
         String qqAppId,
         String qqAppSecret,
         List<String> qqAllowedUsers,
+        Boolean wecomEnabled,
+        String wecomCorpId,
+        String wecomAgentId,
+        String wecomSecret,
+        String wecomToken,
+        String wecomEncodingAesKey,
+        List<String> wecomAllowedUsers,
         String updatedBy
 ) {
 }
