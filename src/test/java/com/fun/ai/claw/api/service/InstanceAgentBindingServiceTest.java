@@ -19,6 +19,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -143,5 +144,119 @@ class InstanceAgentBindingServiceTest {
         assertTrue(Boolean.TRUE.equals(response.agentic()));
         assertEquals(List.of("file_read"), response.allowedTools());
         assertEquals(List.of("skill-novel-to-script"), response.allowedSkills());
+    }
+
+    @Test
+    void upsertKeepsProviderAndModelNullableWhenBindingShouldInheritInstanceDefaults() {
+        UUID instanceId = UUID.randomUUID();
+        Instant now = Instant.now();
+
+        InstanceRepository instanceRepository = mock(InstanceRepository.class);
+        AgentBaselineRepository agentBaselineRepository = mock(AgentBaselineRepository.class);
+        InstanceAgentBindingRepository bindingRepository = mock(InstanceAgentBindingRepository.class);
+        InstanceManagedAgentsConfigService managedAgentsConfigService = mock(InstanceManagedAgentsConfigService.class);
+        InstanceConfigService instanceConfigService = mock(InstanceConfigService.class);
+        InstanceConfigMutationService instanceConfigMutationService = mock(InstanceConfigMutationService.class);
+
+        when(instanceRepository.findById(instanceId)).thenReturn(Optional.of(new ClawInstanceDto(
+                instanceId,
+                "demo",
+                UUID.randomUUID(),
+                "zeroclaw-shell:latest",
+                null,
+                null,
+                null,
+                InstanceRuntime.ZEROCLAW,
+                InstanceStatus.RUNNING,
+                InstanceDesiredState.RUNNING,
+                now,
+                now
+        )));
+
+        AgentBaselineRecord baseline = new AgentBaselineRecord(
+                "mgc-manju-generate",
+                "mgc-manju-generate",
+                "comic writer",
+                "zeroclaw",
+                "MANUAL",
+                null,
+                true,
+                null,
+                null,
+                0.3D,
+                true,
+                null,
+                List.of("file_read"),
+                List.of(),
+                List.of("file_read"),
+                List.of("skill-manju"),
+                "prompt",
+                "tester",
+                now,
+                now
+        );
+        when(agentBaselineRepository.findByAgentKey("mgc-manju-generate")).thenReturn(Optional.of(baseline));
+
+        when(bindingRepository.findByInstanceId(instanceId))
+                .thenReturn(List.of(), List.of(), List.of(
+                        new com.fun.ai.claw.api.model.InstanceAgentBindingRecord(
+                                instanceId,
+                                "mgc-manju-generate",
+                                null,
+                                null,
+                                0.3D,
+                                true,
+                                "prompt",
+                                List.of("file_read"),
+                                List.of("skill-manju"),
+                                null,
+                                "ui-dashboard",
+                                now,
+                                now
+                        )
+                ));
+
+        InstanceConfigResponse configResponse = new InstanceConfigResponse(
+                instanceId,
+                "/tmp/config.toml",
+                "runtime",
+                "default_provider = \"custom:https://api.deepseek.com\"\ndefault_model = \"deepseek-chat\"\n",
+                false,
+                false,
+                null,
+                now,
+                "tester"
+        );
+        when(instanceConfigService.get(instanceId)).thenReturn(configResponse);
+        when(managedAgentsConfigService.parseBindings(eq(instanceId), any())).thenReturn(List.of());
+        when(managedAgentsConfigService.extractDefaults(any()))
+                .thenReturn(new InstanceManagedAgentsConfigService.ManagedAgentDefaults(
+                        "custom:https://api.deepseek.com",
+                        "deepseek-chat"
+                ));
+
+        InstanceAgentBindingService service = new InstanceAgentBindingService(
+                instanceRepository,
+                agentBaselineRepository,
+                bindingRepository,
+                managedAgentsConfigService,
+                instanceConfigService,
+                instanceConfigMutationService
+        );
+
+        var response = service.upsert(
+                instanceId,
+                "mgc-manju-generate",
+                new UpsertInstanceAgentBindingRequest(null, null, null, null, null, null, null, "ui-dashboard")
+        );
+
+        ArgumentCaptor<com.fun.ai.claw.api.model.InstanceAgentBindingRecord> captor =
+                ArgumentCaptor.forClass(com.fun.ai.claw.api.model.InstanceAgentBindingRecord.class);
+        verify(bindingRepository, times(1)).upsert(captor.capture(), any());
+
+        assertNull(captor.getValue().provider());
+        assertNull(captor.getValue().model());
+        assertEquals("custom:https://api.deepseek.com", response.provider());
+        assertEquals("deepseek-chat", response.model());
     }
 }

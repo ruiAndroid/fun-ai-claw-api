@@ -75,20 +75,15 @@ public class InstanceAgentBindingService {
         }
 
         AgentBaselineRecord baseline = baselineOptional.orElse(null);
-        InstanceManagedAgentsConfigService.ManagedAgentDefaults defaults = instanceManagedAgentsConfigService.extractDefaults(
-                instanceConfigService.get(instanceId).configToml()
-        );
         String resolvedProvider = resolveString(
                 request == null ? null : request.provider(),
                 existing != null ? existing.provider() : null,
-                baseline != null ? baseline.provider() : null,
-                defaults.defaultProvider()
+                baseline != null ? baseline.provider() : null
         );
         String resolvedModel = resolveString(
                 request == null ? null : request.model(),
                 existing != null ? existing.model() : null,
-                baseline != null ? baseline.model() : null,
-                defaults.defaultModel()
+                baseline != null ? baseline.model() : null
         );
         Instant now = Instant.now();
         InstanceAgentBindingRecord target = new InstanceAgentBindingRecord(
@@ -175,6 +170,9 @@ public class InstanceAgentBindingService {
 
     private InstanceAgentBindingResponse toResponse(InstanceAgentBindingRecord record) {
         AgentBaselineRecord baseline = agentBaselineRepository.findByAgentKey(record.agentKey()).orElse(null);
+        InstanceManagedAgentsConfigService.ManagedAgentDefaults defaults = instanceManagedAgentsConfigService.extractDefaults(
+                instanceConfigService.get(record.instanceId()).configToml()
+        );
         return new InstanceAgentBindingResponse(
                 record.instanceId(),
                 record.agentKey(),
@@ -184,8 +182,8 @@ public class InstanceAgentBindingService {
                 baseline != null ? baseline.sourceType() : "INSTANCE_CONFIG",
                 baseline != null ? baseline.sourceRef() : null,
                 baseline == null || baseline.enabled(),
-                record.provider(),
-                record.model(),
+                coalesceSetting(record.provider(), baseline != null ? baseline.provider() : null, defaults.defaultProvider()),
+                coalesceSetting(record.model(), baseline != null ? baseline.model() : null, defaults.defaultModel()),
                 record.temperature(),
                 record.agentic(),
                 record.systemPrompt(),
@@ -293,5 +291,15 @@ public class InstanceAgentBindingService {
             return null;
         }
         return value.trim();
+    }
+
+    private String coalesceSetting(String... values) {
+        for (String value : values) {
+            String normalized = trimToNull(value);
+            if (normalized != null) {
+                return normalized;
+            }
+        }
+        return null;
     }
 }

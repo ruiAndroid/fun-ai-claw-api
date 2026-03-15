@@ -15,7 +15,7 @@ import static org.mockito.Mockito.when;
 class InstanceManagedAgentsConfigServiceTest {
 
     @Test
-    void applyPolicyFallsBackToDefaultProviderAndModel() {
+    void applyPolicyLeavesInheritedProviderAndModelImplicit() {
         UUID instanceId = UUID.randomUUID();
         InstanceAgentBindingRepository repository = mock(InstanceAgentBindingRepository.class);
         when(repository.findByInstanceId(instanceId)).thenReturn(List.of(
@@ -46,14 +46,15 @@ class InstanceManagedAgentsConfigServiceTest {
                 """);
 
         assertTrue(rendered.contains("[agents.\"mgc-novel-to-script2\"]"));
-        assertTrue(rendered.contains("provider = \"custom:https://api.ai.fun.tv/v1\""));
-        assertTrue(rendered.contains("model = \"MiniMax-M2.5\""));
+        String agentBlock = rendered.substring(rendered.indexOf("[agents.\"mgc-novel-to-script2\"]"));
+        assertTrue(!agentBlock.contains("\nprovider = "));
+        assertTrue(!agentBlock.contains("\nmodel = "));
         assertTrue(rendered.contains("allowed_skills"));
         assertTrue(rendered.contains("skill-novel-to-script"));
     }
 
     @Test
-    void parseBindingsFallsBackToDefaultProviderAndModel() {
+    void parseBindingsPreservesInheritedProviderAndModelAsNull() {
         UUID instanceId = UUID.randomUUID();
         InstanceAgentBindingRepository repository = mock(InstanceAgentBindingRepository.class);
         InstanceManagedAgentsConfigService service = new InstanceManagedAgentsConfigService(repository);
@@ -69,8 +70,8 @@ class InstanceManagedAgentsConfigServiceTest {
                 """);
 
         assertEquals(1, parsed.size());
-        assertEquals("custom:https://api.ai.fun.tv/v1", parsed.get(0).provider());
-        assertEquals("MiniMax-M2.5", parsed.get(0).model());
+        assertEquals(null, parsed.get(0).provider());
+        assertEquals(null, parsed.get(0).model());
         assertEquals(List.of("skill-novel-to-script"), parsed.get(0).allowedSkills());
     }
 }

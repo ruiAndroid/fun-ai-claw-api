@@ -65,15 +65,11 @@ public class InstanceManagedAgentsConfigService {
                                       List<InstanceAgentBindingRecord> bindings,
                                       boolean stripBlocksWhenBindingsEmpty) {
         String normalized = normalize(configToml);
-        ManagedAgentDefaults defaults = extractDefaultsFromNormalized(normalized);
-        List<InstanceAgentBindingRecord> effectiveBindings = bindings.stream()
-                .map(binding -> applyDefaults(binding, defaults))
-                .toList();
         if (bindings.isEmpty() && !stripBlocksWhenBindingsEmpty) {
             return normalized;
         }
         List<AgentBlockRange> ranges = findAgentBlockRanges(normalized);
-        if (ranges.isEmpty() && effectiveBindings.isEmpty()) {
+        if (ranges.isEmpty() && bindings.isEmpty()) {
             return normalized;
         }
         int insertionPoint = !ranges.isEmpty()
@@ -86,11 +82,11 @@ public class InstanceManagedAgentsConfigService {
         if (StringUtils.hasText(before)) {
             builder.append(before);
         }
-        if (!effectiveBindings.isEmpty()) {
+        if (!bindings.isEmpty()) {
             if (builder.length() > 0) {
                 builder.append('\n').append('\n');
             }
-            builder.append(renderBindings(effectiveBindings).stripTrailing());
+            builder.append(renderBindings(bindings).stripTrailing());
         }
         if (StringUtils.hasText(after)) {
             if (builder.length() > 0) {
@@ -102,7 +98,6 @@ public class InstanceManagedAgentsConfigService {
     }
     public List<InstanceAgentBindingRecord> parseBindings(UUID instanceId, String configToml) {
         String normalized = normalize(configToml);
-        ManagedAgentDefaults defaults = extractDefaultsFromNormalized(normalized);
         Matcher matcher = AGENT_BLOCK_PATTERN.matcher(normalized);
         List<InstanceAgentBindingRecord> records = new ArrayList<>();
         while (matcher.find()) {
@@ -114,8 +109,8 @@ public class InstanceManagedAgentsConfigService {
             records.add(new InstanceAgentBindingRecord(
                     instanceId,
                     agentKey,
-                    firstNonBlankOrNull(findStringValue(PROVIDER_PATTERN, block), defaults.defaultProvider()),
-                    firstNonBlankOrNull(findStringValue(MODEL_PATTERN, block), defaults.defaultModel()),
+                    findStringValue(PROVIDER_PATTERN, block),
+                    findStringValue(MODEL_PATTERN, block),
                     findDoubleValue(TEMPERATURE_PATTERN, block),
                     findBooleanValue(AGENTIC_PATTERN, block),
                     findSystemPromptValue(block),
@@ -247,29 +242,6 @@ public class InstanceManagedAgentsConfigService {
         return new ManagedAgentDefaults(
                 findStringValue(normalizedConfigToml, DEFAULT_PROVIDER_BASIC_PATTERN, DEFAULT_PROVIDER_LITERAL_PATTERN),
                 findStringValue(normalizedConfigToml, DEFAULT_MODEL_BASIC_PATTERN, DEFAULT_MODEL_LITERAL_PATTERN)
-        );
-    }
-
-    private InstanceAgentBindingRecord applyDefaults(InstanceAgentBindingRecord record, ManagedAgentDefaults defaults) {
-        String provider = firstNonBlankOrNull(record.provider(), defaults.defaultProvider());
-        String model = firstNonBlankOrNull(record.model(), defaults.defaultModel());
-        if (Objects.equals(provider, record.provider()) && Objects.equals(model, record.model())) {
-            return record;
-        }
-        return new InstanceAgentBindingRecord(
-                record.instanceId(),
-                record.agentKey(),
-                provider,
-                model,
-                record.temperature(),
-                record.agentic(),
-                record.systemPrompt(),
-                record.allowedTools(),
-                record.allowedSkills(),
-                record.extraConfigToml(),
-                record.updatedBy(),
-                record.createdAt(),
-                record.updatedAt()
         );
     }
 
